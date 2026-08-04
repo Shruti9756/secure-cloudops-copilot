@@ -10,10 +10,19 @@ entrypoint = "app.main:app"
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.9.1",
     "pytest>=9.1.1",
+    "ruff>=0.16.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra"
+
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["I"]
