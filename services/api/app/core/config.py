@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str
     redis_url: str
-
+    # Local development uses an AWS CLI profile; AWS deployments will use an IAM role.
+    aws_profile: str | None = None
+    aws_region: str = "us-east-1"
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
