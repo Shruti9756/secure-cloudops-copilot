@@ -30,3 +30,12 @@ def test_document_chunk_order_is_unique_and_nonnegative() -> None:
 
     assert "uq_document_chunks_document_id_chunk_index" in constraint_names
     assert "ck_document_chunks_chunk_index_nonnegative" in constraint_names
+    assert "ck_document_chunks_embedding_token_count_nonnegative" in constraint_names
+
+
+def test_document_chunk_embedding_is_nullable_and_has_titan_v2_dimensions() -> None:
+    embedding_column = DocumentChunk.__table__.c.embedding
+
+    # Existing chunks are backfilled after this migration, so the column begins nullable.
+    assert embedding_column.nullable is True
+    assert embedding_column.type.dim == 1024

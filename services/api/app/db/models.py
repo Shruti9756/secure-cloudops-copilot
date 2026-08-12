@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -105,6 +106,11 @@ class DocumentChunk(Base):
             "chunk_index >= 0",
             name="ck_document_chunks_chunk_index_nonnegative",
         ),
+        # NULL is allowed before embedding; a recorded token count can never be negative.
+        CheckConstraint(
+            "embedding_token_count >= 0",
+            name="ck_document_chunks_embedding_token_count_nonnegative",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -119,6 +125,19 @@ class DocumentChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # A Titan V2 vector has exactly 1,024 dimensions. It stays NULL until embedded.
+    embedding: Mapped[list[float] | None] = mapped_column(
+        VECTOR(1024),
+        nullable=True,
+    )
+    # Keep the exact model ID so a future model change is traceable and re-embeddable.
+    embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Bedrock returns this for cost/usage observability; NULL means no embedding yet.
+    embedding_token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # We use character-based chunking initially; this records the exact chunk size.
     character_count: Mapped[int] = mapped_column(Integer, nullable=False)
