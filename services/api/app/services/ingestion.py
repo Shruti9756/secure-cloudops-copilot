@@ -82,6 +82,8 @@ def ingest_document(
     document.title = extract_markdown_title(content, fallback_title)
     document.source_sha256 = content_hash
     document.content = content
+    # Existing chunks describe older content and must not be retrieved after an update.
+    document.chunks.clear()
     document.ingestion_status = "pending"
     document.document_metadata = {
         "content_type": "text/markdown",
