@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import KnowledgeDocument
+from app.db.models import KnowledgeDocument, Tenant
 from app.services.embeddings import EmbeddingProvider
 
 EMBEDDABLE_DOCUMENT_STATUSES = frozenset({"chunked", "embedded"})
@@ -72,3 +73,41 @@ def embed_document_chunks(
         skipped_chunk_count=skipped_chunk_count,
         total_input_tokens=total_input_tokens,
     )
+
+
+def embed_chunked_documents(
+    session: Session,
+    tenant_slug: str,
+    provider: EmbeddingProvider,
+) -> list[DocumentEmbeddingResult]:
+    """Embed every chunked document for one tenant workspace.
+
+    `selectinload` fetches chunks efficiently, while the tenant filter prevents
+    one workspace's embedding run from accessing another workspace's documents.
+    """
+    normalized_tenant_slug = tenant_slug.strip()
+
+    if not normalized_tenant_slug:
+        raise ValueError("Tenant slug must not be empty")
+
+    statement = (
+        select(KnowledgeDocument)
+        .join(KnowledgeDocument.tenant)
+        .where(
+            Tenant.slug == normalized_tenant_slug,
+            KnowledgeDocument.ingestion_status == "chunked",
+        )
+        # Load all selected documents' chunks in a second efficient query.
+        .options(selectinload(KnowledgeDocument.chunks))
+        .order_by(KnowledgeDocument.source_path)
+    )
+    documents = list(session.scalars(statement))
+
+    return [
+        embed_document_chunks(
+            session=session,
+            document=document,
+            provider=provider,
+        )
+        for document in documents
+    ]
