@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str
     redis_url: str
+    # Local Python uses loopback; Docker Compose overrides this with the ollama service name.
+    ollama_base_url: str = "http://127.0.0.1:11434"
     # Local development uses an AWS CLI profile; AWS deployments will use an IAM role.
     aws_profile: str | None = None
     aws_region: str = "us-east-1"

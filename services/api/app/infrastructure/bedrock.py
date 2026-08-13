@@ -1,22 +1,13 @@
 import json
-from dataclasses import dataclass
 from typing import Any, Protocol
 
 import boto3
 
 from app.core.config import Settings, get_settings
+from app.services.embeddings import EmbeddingResult
 
 TITAN_TEXT_EMBEDDINGS_V2_MODEL_ID = "amazon.titan-embed-text-v2:0"
 TITAN_TEXT_EMBEDDINGS_V2_DIMENSIONS = 1024
-
-
-@dataclass(frozen=True)
-class EmbeddingResult:
-    """A validated embedding returned by the configured Bedrock model."""
-
-    vector: list[float]
-    input_text_token_count: int
-    model_id: str
 
 
 class BedrockRuntimeClient(Protocol):

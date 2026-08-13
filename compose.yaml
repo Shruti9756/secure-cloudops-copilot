@@ -9,6 +9,8 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
+      # Containers use Docker's internal DNS, not 127.0.0.1.
+      OLLAMA_BASE_URL: http://ollama:11434
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -48,6 +50,24 @@ services:
       retries: 10
       start_period: 5s
 
+  ollama:
+    # Local embedding runtime for development; production will use AWS Bedrock.
+    image: ollama/ollama:0.32.5
+    ports:
+      # Bind only to this laptop, never expose the local model server publicly.
+      - "127.0.0.1:11434:11434"
+    volumes:
+      # Persist downloaded models across container restarts.
+      - ollama_data:/root/.ollama
+    healthcheck:
+      # This succeeds only after the Ollama server is ready to accept local requests.
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
 volumes:
   postgres_data:
   redis_data:
+  ollama_data:
