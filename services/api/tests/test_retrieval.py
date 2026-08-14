@@ -6,6 +6,7 @@ import pytest
 
 from app.services.retrieval import (
     EMBEDDING_DIMENSIONS,
+    MAX_RETRIEVAL_COSINE_DISTANCE,
     RetrievedChunk,
     retrieve_relevant_chunks,
 )
@@ -55,8 +56,9 @@ def test_retrieve_relevant_chunks_scopes_query_and_maps_results() -> None:
     assert "document_chunks.embedding_model" in statement_sql
 
     # pgvector renders cosine distance with the <=> operator.
-    assert "<=>" in statement_sql
-    assert "ORDER BY cosine_distance" in statement_sql
+    # The SQL query rejects weak semantic matches before returning RAG evidence.
+    assert "<=" in statement_sql
+    assert MAX_RETRIEVAL_COSINE_DISTANCE in statement.compile().params.values()
 
     assert results == [
         RetrievedChunk(
@@ -123,6 +125,24 @@ def test_retrieve_relevant_chunks_rejects_invalid_limit_before_querying() -> Non
             query_vector=make_query_vector(),
             embedding_model=TEST_EMBEDDING_MODEL,
             limit="three",  # type: ignore[arg-type]
+        )
+
+    session.execute.assert_not_called()
+
+
+def test_retrieve_relevant_chunks_rejects_an_invalid_relevance_threshold() -> None:
+    session = Mock()
+
+    with pytest.raises(
+        ValueError,
+        match="Maximum cosine distance must be between 0 and 2",
+    ):
+        retrieve_relevant_chunks(
+            session=session,
+            tenant_slug="nimbuscart",
+            query_vector=make_query_vector(),
+            embedding_model=TEST_EMBEDDING_MODEL,
+            max_cosine_distance=2.1,
         )
 
     session.execute.assert_not_called()

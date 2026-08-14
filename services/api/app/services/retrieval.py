@@ -13,10 +13,14 @@ EMBEDDING_DIMENSIONS = 1024
 DEFAULT_RETRIEVAL_LIMIT = 3
 MAX_RETRIEVAL_LIMIT = 10
 
+# Initial value measured from our evaluation queries:
+# relevant examples: 0.2322 and 0.3424; unrelated example: 0.4926.
+MAX_RETRIEVAL_COSINE_DISTANCE = 0.40
+
 
 @dataclass(frozen=True)
 class RetrievedChunk:
-    """A retrieval result plus the source details needed for a grounded answer."""
+    """A retrieval result plus source details needed for a grounded answer."""
 
     chunk_id: UUID
     document_id: UUID
@@ -33,15 +37,17 @@ def retrieve_relevant_chunks(
     query_vector: Sequence[float],
     embedding_model: str,
     limit: int = DEFAULT_RETRIEVAL_LIMIT,
+    max_cosine_distance: float = MAX_RETRIEVAL_COSINE_DISTANCE,
 ) -> list[RetrievedChunk]:
-    """Return the closest embedded chunks for one tenant and embedding model.
+    """Return relevant embedded chunks for one tenant and embedding model.
 
-    The caller embeds the user's question first. This service then performs the
-    database search only—it never calls Ollama, Bedrock, or an LLM itself.
+    The maximum distance filter is applied inside PostgreSQL before ranking.
+    This prevents unrelated "nearest" chunks from reaching the RAG model.
     """
     normalized_tenant_slug = tenant_slug.strip()
     normalized_embedding_model = embedding_model.strip()
     normalized_query_vector = _normalize_query_vector(query_vector)
+    normalized_max_cosine_distance = _normalize_max_cosine_distance(max_cosine_distance)
 
     if not normalized_tenant_slug:
         raise ValueError("Tenant slug must not be empty")
@@ -57,9 +63,8 @@ def retrieve_relevant_chunks(
 
     # pgvector translates this into PostgreSQL cosine-distance SQL.
     # Lower distance means the chunk is more semantically relevant.
-    cosine_distance = DocumentChunk.embedding.cosine_distance(normalized_query_vector).label(
-        "cosine_distance"
-    )
+    distance_expression = DocumentChunk.embedding.cosine_distance(normalized_query_vector)
+    cosine_distance = distance_expression.label("cosine_distance")
 
     statement = (
         select(
@@ -81,6 +86,8 @@ def retrieve_relevant_chunks(
             DocumentChunk.embedding.is_not(None),
             # Prevent comparison of vectors produced by different embedding models.
             DocumentChunk.embedding_model == normalized_embedding_model,
+            # Reject weak semantic matches before they can become RAG evidence.
+            distance_expression <= normalized_max_cosine_distance,
         )
         # Stable tie-breakers keep results predictable if distances are equal.
         .order_by(
@@ -122,3 +129,23 @@ def _normalize_query_vector(query_vector: Sequence[float]) -> list[float]:
         raise ValueError("Query vector must not contain only zeroes")
 
     return [float(value) for value in normalized_vector]
+
+
+def _normalize_max_cosine_distance(max_cosine_distance: float) -> float:
+    """Validate the relevance threshold before using it in SQL."""
+    if isinstance(max_cosine_distance, bool) or not isinstance(
+        max_cosine_distance,
+        int | float,
+    ):
+        raise TypeError("Maximum cosine distance must be numeric")
+
+    normalized_distance = float(max_cosine_distance)
+
+    if not math.isfinite(normalized_distance):
+        raise ValueError("Maximum cosine distance must be finite")
+
+    # Cosine distance theoretically ranges from 0 (same direction) to 2 (opposite).
+    if not 0 <= normalized_distance <= 2:
+        raise ValueError("Maximum cosine distance must be between 0 and 2")
+
+    return normalized_distance
