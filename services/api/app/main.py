@@ -4,15 +4,21 @@ from urllib.error import URLError
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+from redis import Redis
 from sqlalchemy.orm import Session
 
 from app.db.session import get_session_factory
 from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
-from app.infrastructure.redis import redis_is_available
+from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.services.rag import GroundedAnswer, answer_grounded_question
+from app.services.response_cache import (
+    build_ask_response_cache_key,
+    load_cached_response,
+    store_cached_response,
+)
 from app.services.retrieval import DEFAULT_RETRIEVAL_LIMIT, MAX_RETRIEVAL_LIMIT
 
 APP_VERSION = "0.1.0"
@@ -140,6 +146,11 @@ def get_chat_provider() -> OllamaChatClient:
     return OllamaChatClient()
 
 
+def get_redis_cache() -> Redis:
+    """Provide Redis for short-lived response caching; tests override it."""
+    return get_redis_client()
+
+
 def get_answer_status(
     answer: GroundedAnswer,
 ) -> Literal["grounded", "insufficient_evidence", "citation_validation_failed"]:
@@ -212,7 +223,9 @@ def api_status() -> ServiceStatus:
 @app.post("/api/v1/ask", response_model=AskResponse, tags=["rag"])
 def ask_question(
     request: AskRequest,
+    response: Response,
     session: Annotated[Session, Depends(get_database_session)],
+    cache: Annotated[Redis, Depends(get_redis_cache)],
     embedding_provider: Annotated[
         OllamaEmbeddingClient,
         Depends(get_embedding_provider),
@@ -228,6 +241,33 @@ def ask_question(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Question must not be empty",
         )
+
+    # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
+    cache_key = build_ask_response_cache_key(
+        tenant_slug=DEMO_TENANT_SLUG,
+        question=request.question,
+        limit=request.limit,
+    )
+    cache_lookup = load_cached_response(cache, cache_key=cache_key)
+
+    if cache_lookup.payload is not None:
+        try:
+            cached_response = AskResponse.model_validate(cache_lookup.payload)
+        except ValidationError:
+            # A corrupted or outdated entry becomes a miss instead of breaking RAG.
+            pass
+        else:
+            # Never trust a cache entry unless it is still a safe grounded response.
+            if (
+                cached_response.status == "grounded"
+                and cached_response.sources
+                and cached_response.citation_validation_passed is True
+            ):
+                response.headers["X-Cache"] = "HIT"
+                return cached_response
+
+    # Redis problems never block incident investigation; they only disable caching.
+    response.headers["X-Cache"] = "MISS" if cache_lookup.is_available else "BYPASS"
 
     try:
         answer = answer_grounded_question(
@@ -245,4 +285,14 @@ def ask_question(
             detail="The local AI provider is unavailable. Check Ollama and retry.",
         ) from error
 
-    return build_ask_response(answer)
+    ask_response = build_ask_response(answer)
+
+    # Cache only successful evidence-backed answers, never uncertainty or validation failure.
+    if ask_response.status == "grounded" and cache_lookup.is_available:
+        store_cached_response(
+            cache,
+            cache_key=cache_key,
+            payload=ask_response.model_dump(mode="json"),
+        )
+
+    return ask_response

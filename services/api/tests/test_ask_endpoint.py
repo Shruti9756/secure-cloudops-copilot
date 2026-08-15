@@ -9,19 +9,43 @@ from app.main import (
     get_chat_provider,
     get_database_session,
     get_embedding_provider,
+    get_redis_cache,
 )
 from app.services.citations import CitationValidationResult
 from app.services.rag import GroundedAnswer
+from app.services.response_cache import build_ask_response_cache_key
 from app.services.retrieval import RetrievedChunk
 
 client = TestClient(app)
 
 
-def install_fake_dependencies() -> None:
-    """Make endpoint tests independent from PostgreSQL and local Ollama."""
+class FakeRedisCache:
+    """In-memory Redis replacement for endpoint tests."""
+
+    def __init__(self) -> None:
+        self.entries: dict[str, str] = {}
+
+    def get(self, name: str) -> str | None:
+        return self.entries.get(name)
+
+    def set(self, name: str, value: str, ex: int) -> bool:
+        self.entries[name] = value
+        return True
+
+
+def install_fake_dependencies(
+    *,
+    redis_cache: FakeRedisCache | None = None,
+) -> FakeRedisCache:
+    """Make endpoint tests independent from PostgreSQL, Redis, and local Ollama."""
+    cache = redis_cache or FakeRedisCache()
+
     app.dependency_overrides[get_database_session] = lambda: object()
+    app.dependency_overrides[get_redis_cache] = lambda: cache
     app.dependency_overrides[get_embedding_provider] = lambda: object()
     app.dependency_overrides[get_chat_provider] = lambda: object()
+
+    return cache
 
 
 def make_source() -> RetrievedChunk:
@@ -148,7 +172,7 @@ def test_ask_endpoint_returns_insufficient_evidence_without_a_chat_model(
             citation_validation=None,
         )
 
-    install_fake_dependencies()
+    cache = install_fake_dependencies()
     monkeypatch.setattr("app.main.answer_grounded_question", fake_answer_grounded_question)
 
     try:
@@ -166,6 +190,8 @@ def test_ask_endpoint_returns_insufficient_evidence_without_a_chat_model(
     assert response.json()["generation_model"] is None
     assert response.json()["sources"] == []
     assert response.json()["citation_validation_passed"] is None
+    # Uncertain responses are deliberately never cached.
+    assert cache.entries == {}
 
 
 def test_ask_endpoint_returns_safe_status_for_invalid_citations(
@@ -206,3 +232,43 @@ def test_ask_endpoint_returns_safe_status_for_invalid_citations(
     assert response.json()["citation_validation_errors"] == [
         "Answer must include at least one valid citation"
     ]
+
+
+def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache()
+    question = "Why did checkout latency increase?"
+    rag_call = Mock(return_value=make_grounded_answer())
+
+    install_fake_dependencies(redis_cache=cache)
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        first_response = client.post(
+            "/api/v1/ask",
+            json={"question": question, "limit": 2},
+        )
+        second_response = client.post(
+            "/api/v1/ask",
+            json={"question": question, "limit": 2},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    expected_cache_key = build_ask_response_cache_key(
+        tenant_slug="nimbuscart",
+        question=question,
+        limit=2,
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.headers["x-cache"] == "MISS"
+    assert expected_cache_key in cache.entries
+
+    assert second_response.status_code == 200
+    assert second_response.headers["x-cache"] == "HIT"
+    assert second_response.json() == first_response.json()
+
+    # The second request used Redis and avoided a duplicate RAG/model call.
+    rag_call.assert_called_once()
