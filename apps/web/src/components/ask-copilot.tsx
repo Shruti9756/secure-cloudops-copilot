@@ -19,7 +19,7 @@ type RetrievedSource = {
   cosine_distance: number;
 };
 
-type AskResponse = {
+type AskApiResponse = {
   status: AnswerStatus;
   answer: string;
   tenant: string;
@@ -31,6 +31,13 @@ type AskResponse = {
   query_input_tokens: number;
   prompt_tokens: number | null;
   completion_tokens: number | null;
+};
+
+type CacheStatus = "HIT" | "MISS" | "BYPASS" | null;
+
+type AskResponse = AskApiResponse & {
+  // This is read from the HTTP header, not from the API JSON body.
+  cacheStatus: CacheStatus;
 };
 
 type ErrorResponse = {
@@ -59,6 +66,30 @@ function getStatusClasses(status: AnswerStatus): string {
   }
 
   return "border-rose-400/30 bg-rose-400/10 text-rose-200";
+}
+
+function getCacheStatus(headerValue: string | null): CacheStatus {
+  if (
+    headerValue === "HIT" ||
+    headerValue === "MISS" ||
+    headerValue === "BYPASS"
+  ) {
+    return headerValue;
+  }
+
+  return null;
+}
+
+function getCacheStatusClasses(cacheStatus: CacheStatus): string {
+  if (cacheStatus === "HIT") {
+    return "border-emerald-400/30 bg-emerald-400/10 text-emerald-300";
+  }
+
+  if (cacheStatus === "MISS") {
+    return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  }
+
+  return "border-slate-600 bg-slate-800 text-slate-300";
 }
 
 function getErrorMessage(payload: unknown): string {
@@ -112,7 +143,11 @@ export function AskCopilot() {
         throw new Error(getErrorMessage(payload));
       }
 
-      setAnswer(payload as AskResponse);
+      setAnswer({
+        ...(payload as AskApiResponse),
+        // The API explicitly exposes X-Cache through CORS for this UI indicator.
+        cacheStatus: getCacheStatus(response.headers.get("X-Cache")),
+      });
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -194,6 +229,14 @@ export function AskCopilot() {
             <span className="text-xs text-slate-500">
               Workspace: {answer.tenant}
             </span>
+              {answer.cacheStatus ? (
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${getCacheStatusClasses(
+                  answer.cacheStatus,
+                )}`}
+              >
+                Redis cache: {answer.cacheStatus}
+              </span>
+            ) : null}
           </div>
 
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
