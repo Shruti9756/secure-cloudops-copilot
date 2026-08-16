@@ -35,6 +35,12 @@ type AskApiResponse = {
 
 type CacheStatus = "HIT" | "MISS" | "BYPASS" | null;
 
+type RateLimitStatus = {
+  limit: number;
+  remaining: number;
+  resetAfterSeconds: number;
+};
+
 type AskResponse = AskApiResponse & {
   // This is read from the HTTP header, not from the API JSON body.
   cacheStatus: CacheStatus;
@@ -92,6 +98,44 @@ function getCacheStatusClasses(cacheStatus: CacheStatus): string {
   return "border-slate-600 bg-slate-800 text-slate-300";
 }
 
+function getHeaderInteger(headers: Headers, headerName: string): number | null {
+  const rawValue = headers.get(headerName);
+
+  if (rawValue === null) {
+    return null;
+  }
+
+  const parsedValue = Number(rawValue);
+
+  return Number.isInteger(parsedValue) && parsedValue >= 0
+    ? parsedValue
+    : null;
+}
+
+function getRateLimitStatus(headers: Headers): RateLimitStatus | null {
+  const limit = getHeaderInteger(headers, "X-RateLimit-Limit");
+  const remaining = getHeaderInteger(headers, "X-RateLimit-Remaining");
+  const resetAfterSeconds = getHeaderInteger(headers, "X-RateLimit-Reset");
+
+  if (limit === null || remaining === null || resetAfterSeconds === null) {
+    return null;
+  }
+
+  return {
+    limit,
+    remaining,
+    resetAfterSeconds,
+  };
+}
+
+function getRetryAfterSeconds(headers: Headers): number | null {
+  return getHeaderInteger(headers, "Retry-After");
+}
+
+function formatSeconds(seconds: number): string {
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
+}
+
 function getErrorMessage(payload: unknown): string {
   if (
     typeof payload === "object" &&
@@ -110,6 +154,7 @@ export function AskCopilot() {
   const [answer, setAnswer] = useState<AskResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitStatus | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -122,6 +167,7 @@ export function AskCopilot() {
     setIsLoading(true);
     setError(null);
     setAnswer(null);
+    setRateLimit(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/ask`, {
@@ -139,8 +185,20 @@ export function AskCopilot() {
 
       const payload: unknown = await response.json();
 
+            // These headers are safe observability metadata exposed through CORS.
+      setRateLimit(getRateLimitStatus(response.headers));
+
       if (!response.ok) {
-        throw new Error(getErrorMessage(payload));
+        const apiMessage = getErrorMessage(payload);
+        const retryAfterSeconds = getRetryAfterSeconds(response.headers);
+
+        if (response.status === 429 && retryAfterSeconds !== null) {
+          throw new Error(
+            `${apiMessage} Try again in ${formatSeconds(retryAfterSeconds)}.`,
+          );
+        }
+
+        throw new Error(apiMessage);
       }
 
       setAnswer({
@@ -213,6 +271,13 @@ export function AskCopilot() {
         >
           {error}
         </div>
+      ) : null}
+
+      {rateLimit ? (
+        <p className="mt-4 text-xs leading-6 text-slate-400">
+          Request budget: {rateLimit.remaining} / {rateLimit.limit} remaining
+          {" · "}resets in {formatSeconds(rateLimit.resetAfterSeconds)}
+        </p>
       ) : null}
 
       {answer ? (
