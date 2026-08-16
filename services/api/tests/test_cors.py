@@ -43,4 +43,10 @@ def test_cors_exposes_the_cache_header_to_approved_browsers() -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
-    assert response.headers["access-control-expose-headers"] == "X-Cache"
+    exposed_headers = response.headers["access-control-expose-headers"].lower()
+
+    assert "retry-after" in exposed_headers
+    assert "x-cache" in exposed_headers
+    assert "x-ratelimit-limit" in exposed_headers
+    assert "x-ratelimit-remaining" in exposed_headers
+    assert "x-ratelimit-reset" in exposed_headers

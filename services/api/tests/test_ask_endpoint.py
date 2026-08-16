@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.main import (
     app,
@@ -22,8 +23,16 @@ client = TestClient(app)
 class FakeRedisCache:
     """In-memory Redis replacement for endpoint tests."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        rate_limit_result: object = (1, 60),
+        rate_limit_error: Exception | None = None,
+    ) -> None:
         self.entries: dict[str, str] = {}
+        self.rate_limit_result = rate_limit_result
+        self.rate_limit_error = rate_limit_error
+        self.rate_limit_calls: list[tuple[str, int, tuple[str, ...]]] = []
 
     def get(self, name: str) -> str | None:
         return self.entries.get(name)
@@ -31,6 +40,19 @@ class FakeRedisCache:
     def set(self, name: str, value: str, ex: int) -> bool:
         self.entries[name] = value
         return True
+
+    def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: str,
+    ) -> object:
+        self.rate_limit_calls.append((script, numkeys, keys_and_args))
+
+        if self.rate_limit_error is not None:
+            raise self.rate_limit_error
+
+        return self.rate_limit_result
 
 
 def install_fake_dependencies(
@@ -272,3 +294,56 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 
     # The second request used Redis and avoided a duplicate RAG/model call.
     rag_call.assert_called_once()
+
+
+def test_ask_endpoint_rejects_requests_after_the_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache(rate_limit_result=(11, 23))
+    rag_call = Mock()
+
+    install_fake_dependencies(redis_cache=cache)
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == (
+        "Too many requests. Retry after the current rate-limit window."
+    )
+    assert response.headers["retry-after"] == "23"
+    assert response.headers["x-ratelimit-limit"] == "10"
+    assert response.headers["x-ratelimit-remaining"] == "0"
+    assert response.headers["x-ratelimit-reset"] == "23"
+    rag_call.assert_not_called()
+
+
+def test_ask_endpoint_fails_closed_when_rate_limiting_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache(rate_limit_error=RedisConnectionError("Redis is unavailable"))
+    rag_call = Mock()
+
+    install_fake_dependencies(redis_cache=cache)
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Request protection is temporarily unavailable. Retry shortly."
+    )
+    assert response.headers["retry-after"] == "1"
+    rag_call.assert_not_called()

@@ -2,18 +2,23 @@ from collections.abc import Iterator
 from typing import Annotated, Literal
 from urllib.error import URLError
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 from redis import Redis
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.services.rag import GroundedAnswer, answer_grounded_question
+from app.services.rate_limit import (
+    build_rate_limit_key,
+    check_rate_limit,
+)
 from app.services.response_cache import (
     build_ask_response_cache_key,
     load_cached_response,
@@ -101,7 +106,13 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
     # Allow the approved frontend to display safe cache observability metadata.
-    expose_headers=["X-Cache"],
+    expose_headers=[
+        "Retry-After",
+        "X-Cache",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+    ],
 )
 
 
@@ -151,6 +162,15 @@ def get_chat_provider() -> OllamaChatClient:
 def get_redis_cache() -> Redis:
     """Provide Redis for short-lived response caching; tests override it."""
     return get_redis_client()
+
+
+def get_client_identifier(request: Request) -> str:
+    """Return the direct client identity without trusting spoofable proxy headers."""
+    if request.client is None:
+        return "unknown-client"
+
+    # We will configure trusted proxy handling explicitly before using AWS-forwarded IPs.
+    return request.client.host
 
 
 def get_answer_status(
@@ -225,6 +245,7 @@ def api_status() -> ServiceStatus:
 @app.post("/api/v1/ask", response_model=AskResponse, tags=["rag"])
 def ask_question(
     request: AskRequest,
+    http_request: Request,
     response: Response,
     session: Annotated[Session, Depends(get_database_session)],
     cache: Annotated[Redis, Depends(get_redis_cache)],
@@ -237,12 +258,48 @@ def ask_question(
         Depends(get_chat_provider),
     ],
 ) -> AskResponse:
-    """Answer one tenant-scoped question through the guarded local RAG pipeline."""
+    """Answer one tenant-scoped question through guarded and rate-limited RAG."""
     if not request.question.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Question must not be empty",
         )
+
+    settings = get_settings()
+    rate_limit_key = build_rate_limit_key(
+        tenant_slug=DEMO_TENANT_SLUG,
+        client_identifier=get_client_identifier(http_request),
+    )
+    rate_limit = check_rate_limit(
+        cache,
+        cache_key=rate_limit_key,
+        limit=settings.ask_rate_limit_requests,
+        window_seconds=settings.ask_rate_limit_window_seconds,
+    )
+
+    # Unlike caching, a missing rate limiter is a security failure, so fail closed.
+    if not rate_limit.is_enforced:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Request protection is temporarily unavailable. Retry shortly.",
+            headers={"Retry-After": "1"},
+        )
+
+    if not rate_limit.is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Retry after the current rate-limit window.",
+            headers={
+                "Retry-After": str(rate_limit.reset_after_seconds),
+                "X-RateLimit-Limit": str(rate_limit.limit),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(rate_limit.reset_after_seconds),
+            },
+        )
+
+    response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
+    response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
+    response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_after_seconds)
 
     # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
     cache_key = build_ask_response_cache_key(
