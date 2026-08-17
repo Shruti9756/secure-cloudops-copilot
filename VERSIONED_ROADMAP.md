@@ -320,6 +320,22 @@
 
 **Purpose:** Build a custom MCP **server** that uses the standard MCP protocol and exposes safe, project-specific capabilities. We do not invent our own MCP protocol.
 
+## Early local MCP checkpoint — completed 17 August 2026
+
+> This is an early local implementation for hands-on MCP learning. It does not complete the V0.5 release gate: authentication, audit records, Docker packaging, ECS deployment, and real AWS/CloudWatch integrations remain future work.
+
+- [x] Built a separate Python MCP server using the official MCP SDK and local STDIO transport.
+- [x] Implemented and tested read-only tools:
+  - `get_investigation_scope`
+  - `search_incident_knowledge`
+  - `get_deployment_context`
+- [x] Added a fixed-endpoint API adapter; the MCP server cannot call arbitrary URLs, shell commands, SQL, or AWS APIs.
+- [x] Added typed input validation, bounded request parameters, safe upstream-error mapping, and 60-second API deadlines.
+- [x] Added and tested the `securecloudops://runbooks/{runbook_name}` resource template.
+- [x] Added and tested the user-selected `investigate-deployment-impact` MCP prompt.
+- [x] Verified the search tool, deployment tool, runbook resource, and prompt live with MCP Inspector.
+- [x] Added unit-test coverage for adapter boundaries, invalid input, not-found cases, rate-limit responses, resources, and prompts: 23 tests passing.
+
 ## MCP server
 
 - [ ] Implement a separate Python MCP server using the official MCP SDK / FastMCP.
@@ -507,7 +523,7 @@ This is the authoritative inventory of every planned technology and where it wil
 | Amazon SQS and dead-letter queues | V0.4 | [ ] |
 | Amazon OpenSearch Serverless | V0.4, optional | [ ] |
 | GitHub Actions, AWS OIDC, CI/CD | V0.1, V0.4 | [ ] |
-| MCP protocol, official Python MCP SDK / FastMCP | V0.5 | [ ] |
+| MCP protocol, official Python MCP SDK / FastMCP | V0.5 | [x] |
 | MCP schemas, auth, allowlists, approvals, audit | V0.5 | [ ] |
 | Bedrock AgentCore comparison | V0.5 / V1.1 | [ ] |
 | OWASP LLM Top 10, STRIDE, threat model, red team | V0.6 | [ ] |
