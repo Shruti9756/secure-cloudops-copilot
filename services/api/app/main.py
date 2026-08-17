@@ -3,12 +3,15 @@ from typing import Annotated, Literal
 from urllib.error import URLError
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 from redis import Redis
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.models import KnowledgeDocument, Tenant
 from app.db.session import get_session_factory
 from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
@@ -30,6 +33,10 @@ APP_VERSION = "0.1.0"
 
 # Temporary development scope. Authentication will derive the tenant later.
 DEMO_TENANT_SLUG = "nimbuscart"
+
+# These patterns make the server build the only permitted deployment document path.
+SERVICE_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
+SEMANTIC_VERSION_PATTERN = r"^\d+\.\d+\.\d+$"
 
 # Explicit local browser origins; CORS is tightened further for production.
 DEVELOPMENT_FRONTEND_ORIGINS = [
@@ -91,6 +98,17 @@ class AskResponse(BaseModel):
     query_input_tokens: int
     prompt_tokens: int | None
     completion_tokens: int | None
+
+
+class DeploymentContextResponse(BaseModel):
+    """Approved deployment context returned through a server-scoped read-only route."""
+
+    tenant: str
+    service: str
+    version: str
+    title: str
+    source_identifier: str
+    content: str
 
 
 app = FastAPI(
@@ -240,6 +258,61 @@ def readiness_check(response: Response) -> ReadinessStatus:
 @app.get("/api/v1/status", response_model=ServiceStatus, tags=["system"])
 def api_status() -> ServiceStatus:
     return get_status()
+
+
+@app.get(
+    "/api/v1/deployments/{service}/{version}",
+    response_model=DeploymentContextResponse,
+    tags=["knowledge"],
+)
+def get_deployment_context(
+    service: Annotated[
+        str,
+        ApiPath(
+            pattern=SERVICE_NAME_PATTERN,
+            description="Lowercase deployment service name.",
+        ),
+    ],
+    version: Annotated[
+        str,
+        ApiPath(
+            pattern=SEMANTIC_VERSION_PATTERN,
+            description="Deployment semantic version, for example 2.4.0.",
+        ),
+    ],
+    session: Annotated[Session, Depends(get_database_session)],
+) -> DeploymentContextResponse:
+    """Return one indexed deployment record from the server-controlled tenant."""
+
+    # The caller never supplies a document path; the server constructs the only allowed one.
+    source_path = f"deployments/{service}-{version}.md"
+
+    statement = (
+        select(KnowledgeDocument)
+        .join(Tenant)
+        .where(
+            Tenant.slug == DEMO_TENANT_SLUG,
+            KnowledgeDocument.source_path == source_path,
+            # Pending or changed documents must not be exposed as approved context.
+            KnowledgeDocument.ingestion_status == "embedded",
+        )
+    )
+    document = session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Approved deployment context was not found.",
+        )
+
+    return DeploymentContextResponse(
+        tenant=DEMO_TENANT_SLUG,
+        service=service,
+        version=version,
+        title=document.title,
+        source_identifier=document.source_path,
+        content=document.content,
+    )
 
 
 @app.post("/api/v1/ask", response_model=AskResponse, tags=["rag"])
