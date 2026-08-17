@@ -11,6 +11,7 @@ from server import (
     RUNBOOK_RESOURCE_CONTEXT_NOTICE,
     SERVER_NAME,
     SERVER_VERSION,
+    build_deployment_impact_prompt,
     get_deployment_context_payload,
     get_investigation_scope_payload,
     get_runbook_resource_content,
@@ -327,3 +328,30 @@ def test_runbook_resource_returns_safe_content_when_the_record_is_missing() -> N
         "# Runbook context unavailable\n\n"
         "Approved runbook context was not found."
     )
+
+
+def test_deployment_impact_prompt_builds_a_safe_evidence_based_workflow() -> None:
+    result = build_deployment_impact_prompt(
+        service=" checkout ",
+        version=" 2.4.0 ",
+    )
+
+    assert "deployment `checkout` version `2.4.0`" in result
+    assert "get_deployment_context" in result
+    assert "search_incident_knowledge" in result
+    assert "Separate confirmed evidence from hypotheses." in result
+    assert "Do not change AWS resources" in result
+
+
+def test_deployment_impact_prompt_rejects_invalid_identity() -> None:
+    with pytest.raises(ValueError, match="lowercase letters"):
+        build_deployment_impact_prompt(
+            service="../checkout",
+            version="2.4.0",
+        )
+
+    with pytest.raises(ValueError, match="major.minor.patch"):
+        build_deployment_impact_prompt(
+            service="checkout",
+            version="latest",
+        )
