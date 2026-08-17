@@ -1,16 +1,22 @@
-"""Controlled HTTP adapter for the guarded SecureCloudOps FastAPI endpoint."""
+"""Controlled HTTP adapter for approved SecureCloudOps FastAPI endpoints."""
 
 import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from re import fullmatch
 from typing import Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
 ASK_ENDPOINT_PATH = "/api/v1/ask"
+DEPLOYMENT_ENDPOINT_PATH = "/api/v1/deployments"
 DEFAULT_TIMEOUT_SECONDS = 60
+
+# These patterns prevent MCP tool arguments from becoming arbitrary URL paths.
+SERVICE_NAME_PATTERN = r"[a-z][a-z0-9-]{0,62}"
+SEMANTIC_VERSION_PATTERN = r"\d+\.\d+\.\d+"
 
 
 class SecureCloudOpsApiUnavailableError(Exception):
@@ -58,6 +64,14 @@ class JsonHttpTransport(Protocol):
     ) -> JsonHttpResponse:
         """POST one JSON object and return a parsed JSON response."""
 
+    def get_json(
+        self,
+        *,
+        url: str,
+        timeout_seconds: int,
+    ) -> JsonHttpResponse:
+        """GET one JSON object and return a parsed JSON response."""
+
 
 class UrllibJsonHttpTransport:
     """Standard-library HTTP transport used in local development and containers."""
@@ -75,7 +89,28 @@ class UrllibJsonHttpTransport:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        return self._send_request(request=request, timeout_seconds=timeout_seconds)
 
+    def get_json(
+        self,
+        *,
+        url: str,
+        timeout_seconds: int,
+    ) -> JsonHttpResponse:
+        request = Request(
+            url,
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        return self._send_request(request=request, timeout_seconds=timeout_seconds)
+
+    def _send_request(
+        self,
+        *,
+        request: Request,
+        timeout_seconds: int,
+    ) -> JsonHttpResponse:
+        """Send one fixed request and convert success or HTTP errors to safe data."""
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
                 return JsonHttpResponse(
@@ -84,7 +119,7 @@ class UrllibJsonHttpTransport:
                     headers=dict(response.headers.items()),
                 )
         except HTTPError as error:
-            # HTTP errors still contain a useful JSON body and rate-limit headers.
+            # HTTP errors still contain a useful JSON body and safe response headers.
             return JsonHttpResponse(
                 status_code=error.code,
                 payload=_decode_json_object(error.read()),
@@ -122,8 +157,20 @@ class GuardedApiAnswer:
     cache_status: str | None
 
 
+@dataclass(frozen=True)
+class DeploymentContext:
+    """One approved deployment record retrieved through the fixed API route."""
+
+    tenant: str
+    service: str
+    version: str
+    title: str
+    source_identifier: str
+    content: str
+
+
 class SecureCloudOpsApiClient:
-    """Adapter that permits MCP tools to call only the approved guarded API."""
+    """Adapter that permits MCP tools to call only approved guarded API routes."""
 
     def __init__(
         self,
@@ -139,7 +186,10 @@ class SecureCloudOpsApiClient:
         if not configured_base_url:
             raise ValueError("SecureCloudOps API base URL must not be empty")
 
-        if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        if not isinstance(timeout_seconds, int):
+            raise TypeError("API timeout must be an integer")
+
+        if timeout_seconds <= 0:
             raise ValueError("API timeout must be a positive integer")
 
         self._api_base_url = configured_base_url.rstrip("/")
@@ -165,6 +215,73 @@ class SecureCloudOpsApiClient:
             )
 
         return _parse_guarded_answer(response)
+
+    def get_deployment_context(
+        self,
+        *,
+        service: str,
+        version: str,
+    ) -> DeploymentContext:
+        """Retrieve one approved deployment record through the fixed GET route."""
+        validated_service = _validate_service_name(service)
+        validated_version = _validate_semantic_version(version)
+
+        response = self._transport.get_json(
+            url=(
+                f"{self._api_base_url}{DEPLOYMENT_ENDPOINT_PATH}/"
+                f"{validated_service}/{validated_version}"
+            ),
+            timeout_seconds=self._timeout_seconds,
+        )
+
+        if response.status_code != 200:
+            raise SecureCloudOpsApiRequestError(
+                status_code=response.status_code,
+                detail=_read_error_detail(response.payload),
+                retry_after_seconds=_read_optional_header_int(
+                    response.headers,
+                    "Retry-After",
+                ),
+            )
+
+        deployment_context = _parse_deployment_context(response)
+
+        # A mismatched response must never be returned under the requested identity.
+        if (
+            deployment_context.service != validated_service
+            or deployment_context.version != validated_version
+        ):
+            raise SecureCloudOpsApiProtocolError(
+                "SecureCloudOps API returned mismatched deployment context."
+            )
+
+        return deployment_context
+
+
+def _validate_service_name(service: str) -> str:
+    """Accept only a lowercase service identifier, never a raw URL segment."""
+    if not isinstance(service, str):
+        raise TypeError("Service must be a string")
+
+    normalized_service = service.strip()
+
+    if not fullmatch(SERVICE_NAME_PATTERN, normalized_service):
+        raise ValueError("Service must use lowercase letters, numbers, and hyphens only.")
+
+    return normalized_service
+
+
+def _validate_semantic_version(version: str) -> str:
+    """Accept only a simple semantic version, never a raw URL segment."""
+    if not isinstance(version, str):
+        raise TypeError("Version must be a string")
+
+    normalized_version = version.strip()
+
+    if not fullmatch(SEMANTIC_VERSION_PATTERN, normalized_version):
+        raise ValueError("Version must use the form major.minor.patch")
+
+    return normalized_version
 
 
 def _decode_json_object(raw_body: bytes) -> dict[str, object]:
@@ -213,6 +330,18 @@ def _parse_guarded_answer(response: JsonHttpResponse) -> GuardedApiAnswer:
         generation_model=generation_model,
         sources=tuple(_parse_source(raw_source) for raw_source in raw_sources),
         cache_status=_read_optional_header(response.headers, "X-Cache"),
+    )
+
+
+def _parse_deployment_context(response: JsonHttpResponse) -> DeploymentContext:
+    """Validate a deterministic deployment-context response before MCP uses it."""
+    return DeploymentContext(
+        tenant=_required_string(response.payload, "tenant"),
+        service=_required_string(response.payload, "service"),
+        version=_required_string(response.payload, "version"),
+        title=_required_string(response.payload, "title"),
+        source_identifier=_required_string(response.payload, "source_identifier"),
+        content=_required_string(response.payload, "content"),
     )
 
 

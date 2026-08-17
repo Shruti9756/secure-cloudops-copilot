@@ -2,6 +2,7 @@ import pytest
 
 from api_client import (
     ApiSource,
+    DeploymentContext,
     GuardedApiAnswer,
     JsonHttpResponse,
     SecureCloudOpsApiClient,
@@ -13,9 +14,16 @@ from api_client import (
 class FakeJsonHttpTransport:
     """Fake transport that records adapter calls without starting Docker."""
 
-    def __init__(self, response: JsonHttpResponse) -> None:
-        self.response = response
-        self.calls: list[tuple[str, dict[str, object], int]] = []
+    def __init__(
+        self,
+        *,
+        post_response: JsonHttpResponse | None = None,
+        get_response: JsonHttpResponse | None = None,
+    ) -> None:
+        self.post_response = post_response
+        self.get_response = get_response
+        self.post_calls: list[tuple[str, dict[str, object], int]] = []
+        self.get_calls: list[tuple[str, int]] = []
 
     def post_json(
         self,
@@ -24,8 +32,25 @@ class FakeJsonHttpTransport:
         payload: dict[str, object],
         timeout_seconds: int,
     ) -> JsonHttpResponse:
-        self.calls.append((url, payload, timeout_seconds))
-        return self.response
+        self.post_calls.append((url, payload, timeout_seconds))
+
+        if self.post_response is None:
+            raise AssertionError("Test did not configure a POST response")
+
+        return self.post_response
+
+    def get_json(
+        self,
+        *,
+        url: str,
+        timeout_seconds: int,
+    ) -> JsonHttpResponse:
+        self.get_calls.append((url, timeout_seconds))
+
+        if self.get_response is None:
+            raise AssertionError("Test did not configure a GET response")
+
+        return self.get_response
 
 
 def make_success_response() -> JsonHttpResponse:
@@ -49,8 +74,23 @@ def make_success_response() -> JsonHttpResponse:
     )
 
 
+def make_deployment_context_response() -> JsonHttpResponse:
+    return JsonHttpResponse(
+        status_code=200,
+        payload={
+            "tenant": "nimbuscart",
+            "service": "checkout",
+            "version": "2.4.0",
+            "title": "Deployment Record: checkout 2.4.0",
+            "source_identifier": "deployments/checkout-2.4.0.md",
+            "content": "The PostgreSQL idle timeout changed from 120 seconds to 5 seconds.",
+        },
+        headers={},
+    )
+
+
 def test_adapter_calls_only_the_fixed_guarded_ask_endpoint() -> None:
-    transport = FakeJsonHttpTransport(make_success_response())
+    transport = FakeJsonHttpTransport(post_response=make_success_response())
     client = SecureCloudOpsApiClient(
         api_base_url="http://api.internal/",
         transport=transport,
@@ -76,7 +116,7 @@ def test_adapter_calls_only_the_fixed_guarded_ask_endpoint() -> None:
         ),
         cache_status="HIT",
     )
-    assert transport.calls == [
+    assert transport.post_calls == [
         (
             "http://api.internal/api/v1/ask",
             {
@@ -86,11 +126,12 @@ def test_adapter_calls_only_the_fixed_guarded_ask_endpoint() -> None:
             60,
         )
     ]
+    assert transport.get_calls == []
 
 
 def test_adapter_preserves_a_safe_rate_limit_rejection() -> None:
     transport = FakeJsonHttpTransport(
-        JsonHttpResponse(
+        post_response=JsonHttpResponse(
             status_code=429,
             payload={"detail": "Too many requests. Retry after the current rate-limit window."},
             headers={"Retry-After": "42"},
@@ -107,16 +148,17 @@ def test_adapter_preserves_a_safe_rate_limit_rejection() -> None:
 
 
 def test_adapter_rejects_malformed_success_responses() -> None:
-    malformed_response = make_success_response()
     malformed_response = JsonHttpResponse(
-        status_code=malformed_response.status_code,
+        status_code=200,
         payload={
-            **malformed_response.payload,
+            **make_success_response().payload,
             "sources": "not a list",
         },
-        headers=malformed_response.headers,
+        headers={},
     )
-    client = SecureCloudOpsApiClient(transport=FakeJsonHttpTransport(malformed_response))
+    client = SecureCloudOpsApiClient(
+        transport=FakeJsonHttpTransport(post_response=malformed_response)
+    )
 
     with pytest.raises(SecureCloudOpsApiProtocolError):
         client.ask(question="Why did checkout latency increase?", limit=2)
@@ -125,3 +167,63 @@ def test_adapter_rejects_malformed_success_responses() -> None:
 def test_adapter_rejects_an_empty_base_url() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         SecureCloudOpsApiClient(api_base_url="   ")
+
+
+def test_adapter_calls_only_the_fixed_deployment_context_endpoint() -> None:
+    transport = FakeJsonHttpTransport(get_response=make_deployment_context_response())
+    client = SecureCloudOpsApiClient(
+        api_base_url="http://api.internal/",
+        transport=transport,
+    )
+
+    context = client.get_deployment_context(
+        service=" checkout ",
+        version=" 2.4.0 ",
+    )
+
+    assert context == DeploymentContext(
+        tenant="nimbuscart",
+        service="checkout",
+        version="2.4.0",
+        title="Deployment Record: checkout 2.4.0",
+        source_identifier="deployments/checkout-2.4.0.md",
+        content="The PostgreSQL idle timeout changed from 120 seconds to 5 seconds.",
+    )
+    assert transport.get_calls == [
+        (
+            "http://api.internal/api/v1/deployments/checkout/2.4.0",
+            60,
+        )
+    ]
+    assert transport.post_calls == []
+
+
+def test_adapter_preserves_a_safe_not_found_rejection() -> None:
+    transport = FakeJsonHttpTransport(
+        get_response=JsonHttpResponse(
+            status_code=404,
+            payload={"detail": "Approved deployment context was not found."},
+            headers={},
+        )
+    )
+    client = SecureCloudOpsApiClient(transport=transport)
+
+    with pytest.raises(SecureCloudOpsApiRequestError) as error:
+        client.get_deployment_context(service="catalog", version="9.9.9")
+
+    assert error.value.status_code == 404
+    assert error.value.detail == "Approved deployment context was not found."
+    assert error.value.retry_after_seconds is None
+
+
+def test_adapter_rejects_unsafe_deployment_path_parts_before_network_access() -> None:
+    transport = FakeJsonHttpTransport(get_response=make_deployment_context_response())
+    client = SecureCloudOpsApiClient(transport=transport)
+
+    with pytest.raises(ValueError, match="lowercase letters"):
+        client.get_deployment_context(service="../ask", version="2.4.0")
+
+    with pytest.raises(ValueError, match="major.minor.patch"):
+        client.get_deployment_context(service="checkout", version="latest")
+
+    assert transport.get_calls == []
