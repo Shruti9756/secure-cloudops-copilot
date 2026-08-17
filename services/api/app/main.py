@@ -38,6 +38,8 @@ DEMO_TENANT_SLUG = "nimbuscart"
 SERVICE_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
 SEMANTIC_VERSION_PATTERN = r"^\d+\.\d+\.\d+$"
 
+RUNBOOK_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
+
 # Explicit local browser origins; CORS is tightened further for production.
 DEVELOPMENT_FRONTEND_ORIGINS = [
     "http://localhost:3000",
@@ -106,6 +108,16 @@ class DeploymentContextResponse(BaseModel):
     tenant: str
     service: str
     version: str
+    title: str
+    source_identifier: str
+    content: str
+
+
+class RunbookContextResponse(BaseModel):
+    """Approved runbook context returned through a server-scoped read-only route."""
+
+    tenant: str
+    runbook_name: str
     title: str
     source_identifier: str
     content: str
@@ -309,6 +321,53 @@ def get_deployment_context(
         tenant=DEMO_TENANT_SLUG,
         service=service,
         version=version,
+        title=document.title,
+        source_identifier=document.source_path,
+        content=document.content,
+    )
+
+
+@app.get(
+    "/api/v1/runbooks/{runbook_name}",
+    response_model=RunbookContextResponse,
+    tags=["knowledge"],
+)
+def get_runbook_context(
+    runbook_name: Annotated[
+        str,
+        ApiPath(
+            pattern=RUNBOOK_NAME_PATTERN,
+            description="Lowercase runbook identifier.",
+        ),
+    ],
+    session: Annotated[Session, Depends(get_database_session)],
+) -> RunbookContextResponse:
+    """Return one indexed runbook from the server-controlled tenant."""
+
+    # The caller never supplies a document path; the server constructs the only allowed one.
+    source_path = f"runbooks/{runbook_name}.md"
+
+    statement = (
+        select(KnowledgeDocument)
+        .join(Tenant)
+        .where(
+            Tenant.slug == DEMO_TENANT_SLUG,
+            KnowledgeDocument.source_path == source_path,
+            # Pending or changed documents must not be exposed as approved context.
+            KnowledgeDocument.ingestion_status == "embedded",
+        )
+    )
+    document = session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Approved runbook context was not found.",
+        )
+
+    return RunbookContextResponse(
+        tenant=DEMO_TENANT_SLUG,
+        runbook_name=runbook_name,
         title=document.title,
         source_identifier=document.source_path,
         content=document.content,
