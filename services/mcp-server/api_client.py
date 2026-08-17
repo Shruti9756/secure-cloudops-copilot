@@ -12,11 +12,14 @@ from urllib.request import Request, urlopen
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
 ASK_ENDPOINT_PATH = "/api/v1/ask"
 DEPLOYMENT_ENDPOINT_PATH = "/api/v1/deployments"
+RUNBOOK_ENDPOINT_PATH = "/api/v1/runbooks"
 DEFAULT_TIMEOUT_SECONDS = 60
 
 # These patterns prevent MCP tool arguments from becoming arbitrary URL paths.
 SERVICE_NAME_PATTERN = r"[a-z][a-z0-9-]{0,62}"
 SEMANTIC_VERSION_PATTERN = r"\d+\.\d+\.\d+"
+
+RUNBOOK_NAME_PATTERN = r"[a-z][a-z0-9-]{0,62}"
 
 
 class SecureCloudOpsApiUnavailableError(Exception):
@@ -169,6 +172,17 @@ class DeploymentContext:
     content: str
 
 
+@dataclass(frozen=True)
+class RunbookContext:
+    """One approved runbook record retrieved through the fixed API route."""
+
+    tenant: str
+    runbook_name: str
+    title: str
+    source_identifier: str
+    content: str
+
+
 class SecureCloudOpsApiClient:
     """Adapter that permits MCP tools to call only approved guarded API routes."""
 
@@ -257,6 +271,38 @@ class SecureCloudOpsApiClient:
 
         return deployment_context
 
+    def get_runbook_context(
+        self,
+        *,
+        runbook_name: str,
+    ) -> RunbookContext:
+        """Retrieve one approved runbook record through the fixed GET route."""
+        validated_runbook_name = _validate_runbook_name(runbook_name)
+
+        response = self._transport.get_json(
+            url=(f"{self._api_base_url}{RUNBOOK_ENDPOINT_PATH}/{validated_runbook_name}"),
+            timeout_seconds=self._timeout_seconds,
+        )
+
+        if response.status_code != 200:
+            raise SecureCloudOpsApiRequestError(
+                status_code=response.status_code,
+                detail=_read_error_detail(response.payload),
+                retry_after_seconds=_read_optional_header_int(
+                    response.headers,
+                    "Retry-After",
+                ),
+            )
+
+        runbook_context = _parse_runbook_context(response)
+
+        if runbook_context.runbook_name != validated_runbook_name:
+            raise SecureCloudOpsApiProtocolError(
+                "SecureCloudOps API returned mismatched runbook context."
+            )
+
+        return runbook_context
+
 
 def _validate_service_name(service: str) -> str:
     """Accept only a lowercase service identifier, never a raw URL segment."""
@@ -282,6 +328,19 @@ def _validate_semantic_version(version: str) -> str:
         raise ValueError("Version must use the form major.minor.patch")
 
     return normalized_version
+
+
+def _validate_runbook_name(runbook_name: str) -> str:
+    """Accept only a lowercase runbook identifier, never a raw URL segment."""
+    if not isinstance(runbook_name, str):
+        raise TypeError("Runbook name must be a string")
+
+    normalized_runbook_name = runbook_name.strip()
+
+    if not fullmatch(RUNBOOK_NAME_PATTERN, normalized_runbook_name):
+        raise ValueError("Runbook name must use lowercase letters, numbers, and hyphens only.")
+
+    return normalized_runbook_name
 
 
 def _decode_json_object(raw_body: bytes) -> dict[str, object]:
@@ -339,6 +398,17 @@ def _parse_deployment_context(response: JsonHttpResponse) -> DeploymentContext:
         tenant=_required_string(response.payload, "tenant"),
         service=_required_string(response.payload, "service"),
         version=_required_string(response.payload, "version"),
+        title=_required_string(response.payload, "title"),
+        source_identifier=_required_string(response.payload, "source_identifier"),
+        content=_required_string(response.payload, "content"),
+    )
+
+
+def _parse_runbook_context(response: JsonHttpResponse) -> RunbookContext:
+    """Validate a deterministic runbook-context response before MCP uses it."""
+    return RunbookContext(
+        tenant=_required_string(response.payload, "tenant"),
+        runbook_name=_required_string(response.payload, "runbook_name"),
         title=_required_string(response.payload, "title"),
         source_identifier=_required_string(response.payload, "source_identifier"),
         content=_required_string(response.payload, "content"),

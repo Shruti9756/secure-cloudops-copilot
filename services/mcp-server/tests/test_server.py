@@ -4,13 +4,16 @@ from api_client import (
     ApiSource,
     DeploymentContext,
     GuardedApiAnswer,
+    RunbookContext,
     SecureCloudOpsApiRequestError,
 )
 from server import (
+    RUNBOOK_RESOURCE_CONTEXT_NOTICE,
     SERVER_NAME,
     SERVER_VERSION,
     get_deployment_context_payload,
     get_investigation_scope_payload,
+    get_runbook_resource_content,
     search_incident_knowledge_payload,
 )
 
@@ -23,10 +26,13 @@ class FakeInvestigationApiClient:
         *,
         answer: GuardedApiAnswer | None = None,
         deployment_context: DeploymentContext | None = None,
+        runbook_context: RunbookContext | None = None,
         error: Exception | None = None,
     ) -> None:
         self.answer = answer
         self.deployment_context = deployment_context
+        self.runbook_context = runbook_context
+        self.runbook_calls: list[str] = []
         self.error = error
         self.search_calls: list[tuple[str, int]] = []
         self.deployment_calls: list[tuple[str, str]] = []
@@ -53,6 +59,19 @@ class FakeInvestigationApiClient:
 
         assert self.deployment_context is not None
         return self.deployment_context
+
+    def get_runbook_context(
+        self,
+        *,
+        runbook_name: str,
+    ) -> RunbookContext:
+        self.runbook_calls.append(runbook_name)
+
+        if self.error is not None:
+            raise self.error
+
+        assert self.runbook_context is not None
+        return self.runbook_context
 
 
 def make_grounded_answer() -> GuardedApiAnswer:
@@ -81,6 +100,16 @@ def make_deployment_context() -> DeploymentContext:
         title="Deployment Record: checkout 2.4.0",
         source_identifier="deployments/checkout-2.4.0.md",
         content="The PostgreSQL idle timeout changed from 120 seconds to 5 seconds.",
+    )
+
+
+def make_runbook_context() -> RunbookContext:
+    return RunbookContext(
+        tenant="nimbuscart",
+        runbook_name="checkout-latency",
+        title="Runbook: Checkout Latency Investigation",
+        source_identifier="runbooks/checkout-latency.md",
+        content="# Runbook: Checkout Latency Investigation\n\nInspect Redis and PostgreSQL.",
     )
 
 
@@ -249,3 +278,52 @@ def test_deployment_tool_returns_a_safe_not_found_rejection() -> None:
         "message": "Approved deployment context was not found.",
         "retry_after_seconds": None,
     }
+
+
+def test_runbook_resource_returns_labelled_read_only_markdown_context() -> None:
+    api_client = FakeInvestigationApiClient(runbook_context=make_runbook_context())
+
+    result = get_runbook_resource_content(
+        runbook_name=" checkout-latency ",
+        api_client=api_client,
+    )
+
+    assert api_client.runbook_calls == ["checkout-latency"]
+    assert result == (
+        f"{RUNBOOK_RESOURCE_CONTEXT_NOTICE}\n\n"
+        "# Runbook: Checkout Latency Investigation\n\n"
+        "Inspect Redis and PostgreSQL."
+    )
+
+
+def test_runbook_resource_rejects_unsafe_name_before_calling_the_api() -> None:
+    api_client = FakeInvestigationApiClient(runbook_context=make_runbook_context())
+
+    with pytest.raises(ValueError, match="lowercase letters"):
+        get_runbook_resource_content(
+            runbook_name="../deployments",
+            api_client=api_client,
+        )
+
+    assert api_client.runbook_calls == []
+
+
+def test_runbook_resource_returns_safe_content_when_the_record_is_missing() -> None:
+    api_client = FakeInvestigationApiClient(
+        error=SecureCloudOpsApiRequestError(
+            status_code=404,
+            detail="Approved runbook context was not found.",
+            retry_after_seconds=None,
+        )
+    )
+
+    result = get_runbook_resource_content(
+        runbook_name="payment-failure",
+        api_client=api_client,
+    )
+
+    assert result == (
+        f"{RUNBOOK_RESOURCE_CONTEXT_NOTICE}\n\n"
+        "# Runbook context unavailable\n\n"
+        "Approved runbook context was not found."
+    )

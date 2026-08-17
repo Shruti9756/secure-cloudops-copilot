@@ -5,6 +5,7 @@ from api_client import (
     DeploymentContext,
     GuardedApiAnswer,
     JsonHttpResponse,
+    RunbookContext,
     SecureCloudOpsApiClient,
     SecureCloudOpsApiProtocolError,
     SecureCloudOpsApiRequestError,
@@ -84,6 +85,20 @@ def make_deployment_context_response() -> JsonHttpResponse:
             "title": "Deployment Record: checkout 2.4.0",
             "source_identifier": "deployments/checkout-2.4.0.md",
             "content": "The PostgreSQL idle timeout changed from 120 seconds to 5 seconds.",
+        },
+        headers={},
+    )
+
+
+def make_runbook_context_response() -> JsonHttpResponse:
+    return JsonHttpResponse(
+        status_code=200,
+        payload={
+            "tenant": "nimbuscart",
+            "runbook_name": "checkout-latency",
+            "title": "Runbook: Checkout Latency Investigation",
+            "source_identifier": "runbooks/checkout-latency.md",
+            "content": "Inspect deployment timing, PostgreSQL, Redis, and downstream services.",
         },
         headers={},
     )
@@ -225,5 +240,60 @@ def test_adapter_rejects_unsafe_deployment_path_parts_before_network_access() ->
 
     with pytest.raises(ValueError, match="major.minor.patch"):
         client.get_deployment_context(service="checkout", version="latest")
+
+    assert transport.get_calls == []
+
+
+def test_adapter_calls_only_the_fixed_runbook_context_endpoint() -> None:
+    transport = FakeJsonHttpTransport(get_response=make_runbook_context_response())
+    client = SecureCloudOpsApiClient(
+        api_base_url="http://api.internal/",
+        transport=transport,
+    )
+
+    context = client.get_runbook_context(
+        runbook_name=" checkout-latency ",
+    )
+
+    assert context == RunbookContext(
+        tenant="nimbuscart",
+        runbook_name="checkout-latency",
+        title="Runbook: Checkout Latency Investigation",
+        source_identifier="runbooks/checkout-latency.md",
+        content="Inspect deployment timing, PostgreSQL, Redis, and downstream services.",
+    )
+    assert transport.get_calls == [
+        (
+            "http://api.internal/api/v1/runbooks/checkout-latency",
+            60,
+        )
+    ]
+    assert transport.post_calls == []
+
+
+def test_adapter_preserves_a_safe_missing_runbook_rejection() -> None:
+    transport = FakeJsonHttpTransport(
+        get_response=JsonHttpResponse(
+            status_code=404,
+            payload={"detail": "Approved runbook context was not found."},
+            headers={},
+        )
+    )
+    client = SecureCloudOpsApiClient(transport=transport)
+
+    with pytest.raises(SecureCloudOpsApiRequestError) as error:
+        client.get_runbook_context(runbook_name="payment-failure")
+
+    assert error.value.status_code == 404
+    assert error.value.detail == "Approved runbook context was not found."
+    assert error.value.retry_after_seconds is None
+
+
+def test_adapter_rejects_unsafe_runbook_name_before_network_access() -> None:
+    transport = FakeJsonHttpTransport(get_response=make_runbook_context_response())
+    client = SecureCloudOpsApiClient(transport=transport)
+
+    with pytest.raises(ValueError, match="lowercase letters"):
+        client.get_runbook_context(runbook_name="../deployments")
 
     assert transport.get_calls == []
