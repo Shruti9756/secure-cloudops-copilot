@@ -11,7 +11,8 @@ const DEFAULT_QUESTION =
 type AnswerStatus =
   | "grounded"
   | "insufficient_evidence"
-  | "citation_validation_failed";
+  | "citation_validation_failed"
+  | "safety_validation_failed";
 
 type RetrievedSource = {
   source_identifier: string;
@@ -28,6 +29,8 @@ type AskApiResponse = {
   sources: RetrievedSource[];
   citation_validation_passed: boolean | null;
   citation_validation_errors: string[];
+  safety_validation_passed: boolean | null;
+  safety_validation_errors: string[];
   query_input_tokens: number;
   prompt_tokens: number | null;
   completion_tokens: number | null;
@@ -225,7 +228,7 @@ export function AskCopilot() {
             Ask the incident copilot
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-400">
-            Answers use only relevant, tenant-scoped indexed evidence.
+            Answers use tenant-scoped evidence and pass citation and safety checks.
           </p>
         </div>
 
@@ -251,7 +254,7 @@ export function AskCopilot() {
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-slate-500">
-            The API enforces the tenant, relevance threshold, and citation checks.
+            Answers use tenant-scoped evidence and pass citation and safety checks.
           </p>
 
           <button
@@ -328,6 +331,29 @@ export function AskCopilot() {
           {answer.citation_validation_errors.length > 0 ? (
             <ul className="list-disc space-y-1 pl-5 text-xs text-rose-200">
               {answer.citation_validation_errors.map((validationError) => (
+                <li key={validationError}>{validationError}</li>
+              ))}
+            </ul>
+          ) : null}
+
+          {answer.safety_validation_passed !== null ? (
+            <p className="text-xs text-slate-400">
+              Safety validation:{" "}
+              <span
+                className={
+                  answer.safety_validation_passed
+                    ? "text-emerald-300"
+                    : "text-rose-300"
+                }
+              >
+                {answer.safety_validation_passed ? "passed" : "failed"}
+              </span>
+            </p>
+          ) : null}
+
+          {answer.safety_validation_errors.length > 0 ? (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-rose-200">
+              {answer.safety_validation_errors.map((validationError) => (
                 <li key={validationError}>{validationError}</li>
               ))}
             </ul>
