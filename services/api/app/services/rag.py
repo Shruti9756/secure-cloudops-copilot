@@ -15,10 +15,17 @@ from app.services.retrieval import (
     RetrievedChunk,
     retrieve_relevant_chunks,
 )
+from app.services.safety import SafetyValidationResult, validate_answer_safety
 
 CITATION_VALIDATION_FAILURE_MESSAGE = (
     "I couldn't safely return a grounded answer because the generated response did not "
     "pass source-citation validation. Review the retrieved sources or try again."
+)
+
+SAFETY_VALIDATION_FAILURE_MESSAGE = (
+    "I couldn't safely return the generated response because it included an "
+    "unsafe operational recommendation. Use the retrieved sources for "
+    "read-only investigation guidance instead."
 )
 
 INSUFFICIENT_EVIDENCE_MESSAGE = (
@@ -58,6 +65,7 @@ class GroundedAnswer:
     completion_token_count: int | None
     sources: tuple[RetrievedChunk, ...]
     citation_validation: CitationValidationResult | None
+    safety_validation: SafetyValidationResult | None
 
 
 def answer_grounded_question(
@@ -112,6 +120,7 @@ def answer_grounded_question(
             completion_token_count=None,
             sources=(),
             citation_validation=None,
+            safety_validation=None,
         )
 
     completion = chat_provider.chat(
@@ -126,6 +135,8 @@ def answer_grounded_question(
         retrieved_chunks=retrieved_chunks,
     )
 
+    safety_validation = validate_answer_safety(completion.content)
+
     # Never show a model answer as grounded when its citations cannot be verified.
     if not citation_validation.is_valid:
         return GroundedAnswer(
@@ -137,6 +148,20 @@ def answer_grounded_question(
             completion_token_count=completion.completion_token_count,
             sources=tuple(retrieved_chunks),
             citation_validation=citation_validation,
+            safety_validation=safety_validation,
+        )
+    # A valid citation never makes an unsafe operational recommendation acceptable.
+    if not safety_validation.is_safe:
+        return GroundedAnswer(
+            answer_text=SAFETY_VALIDATION_FAILURE_MESSAGE,
+            embedding_model=query_embedding.model_id,
+            generation_model=completion.model_id,
+            query_input_token_count=query_embedding.input_text_token_count,
+            prompt_token_count=completion.prompt_token_count,
+            completion_token_count=completion.completion_token_count,
+            sources=tuple(retrieved_chunks),
+            citation_validation=citation_validation,
+            safety_validation=safety_validation,
         )
 
     return GroundedAnswer(
@@ -148,6 +173,7 @@ def answer_grounded_question(
         completion_token_count=completion.completion_token_count,
         sources=tuple(retrieved_chunks),
         citation_validation=citation_validation,
+        safety_validation=safety_validation,
     )
 
 

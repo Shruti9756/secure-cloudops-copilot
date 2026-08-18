@@ -16,6 +16,7 @@ from app.services.citations import CitationValidationResult
 from app.services.rag import GroundedAnswer
 from app.services.response_cache import build_ask_response_cache_key
 from app.services.retrieval import RetrievedChunk
+from app.services.safety import SafetyValidationResult
 
 client = TestClient(app)
 
@@ -101,6 +102,10 @@ def make_grounded_answer() -> GroundedAnswer:
             cited_source_identifiers=("deployments/checkout-2.4.0.md#chunk-0",),
             errors=(),
         ),
+        safety_validation=SafetyValidationResult(
+            is_safe=True,
+            errors=(),
+        ),
     )
 
 
@@ -147,6 +152,8 @@ def test_ask_endpoint_returns_a_grounded_server_scoped_response(
         ],
         "citation_validation_passed": True,
         "citation_validation_errors": [],
+        "safety_validation_passed": True,
+        "safety_validation_errors": [],
         "query_input_tokens": 10,
         "prompt_tokens": 50,
         "completion_tokens": 20,
@@ -192,6 +199,7 @@ def test_ask_endpoint_returns_insufficient_evidence_without_a_chat_model(
             completion_token_count=None,
             sources=(),
             citation_validation=None,
+            safety_validation=None,
         )
 
     cache = install_fake_dependencies()
@@ -212,6 +220,7 @@ def test_ask_endpoint_returns_insufficient_evidence_without_a_chat_model(
     assert response.json()["generation_model"] is None
     assert response.json()["sources"] == []
     assert response.json()["citation_validation_passed"] is None
+    assert response.json()["safety_validation_passed"] is None
     # Uncertain responses are deliberately never cached.
     assert cache.entries == {}
 
@@ -232,6 +241,10 @@ def test_ask_endpoint_returns_safe_status_for_invalid_citations(
                 is_valid=False,
                 cited_source_identifiers=(),
                 errors=("Answer must include at least one valid citation",),
+            ),
+            safety_validation=SafetyValidationResult(
+                is_safe=True,
+                errors=(),
             ),
         )
 
@@ -347,3 +360,51 @@ def test_ask_endpoint_fails_closed_when_rate_limiting_is_unavailable(
     )
     assert response.headers["retry-after"] == "1"
     rag_call.assert_not_called()
+
+
+def test_ask_endpoint_returns_safe_status_for_unsafe_model_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_answer_grounded_question(**kwargs: object) -> GroundedAnswer:
+        return GroundedAnswer(
+            answer_text=(
+                "I couldn't safely return the generated response because it included an "
+                "unsafe operational recommendation. Use the retrieved sources for "
+                "read-only investigation guidance instead."
+            ),
+            embedding_model="test-embedding-model-v1",
+            generation_model="test-chat-model-v1",
+            query_input_token_count=8,
+            prompt_token_count=40,
+            completion_token_count=12,
+            sources=(make_source(),),
+            citation_validation=CitationValidationResult(
+                is_valid=True,
+                cited_source_identifiers=("deployments/checkout-2.4.0.md#chunk-0",),
+                errors=(),
+            ),
+            safety_validation=SafetyValidationResult(
+                is_safe=False,
+                errors=("Answer must not recommend restarting production.",),
+            ),
+        )
+
+    cache = install_fake_dependencies()
+    monkeypatch.setattr("app.main.answer_grounded_question", fake_answer_grounded_question)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "What should I do next?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "safety_validation_failed"
+    assert response.json()["safety_validation_passed"] is False
+    assert response.json()["safety_validation_errors"] == [
+        "Answer must not recommend restarting production."
+    ]
+    # Unsafe model output must never be stored for later reuse.
+    assert cache.entries == {}

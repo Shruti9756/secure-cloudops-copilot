@@ -89,6 +89,7 @@ class AskResponse(BaseModel):
         "grounded",
         "insufficient_evidence",
         "citation_validation_failed",
+        "safety_validation_failed",
     ]
     answer: str
     tenant: str
@@ -97,6 +98,8 @@ class AskResponse(BaseModel):
     sources: list[RetrievedSourceResponse]
     citation_validation_passed: bool | None
     citation_validation_errors: list[str]
+    safety_validation_passed: bool | None
+    safety_validation_errors: list[str]
     query_input_tokens: int
     prompt_tokens: int | None
     completion_tokens: int | None
@@ -205,7 +208,12 @@ def get_client_identifier(request: Request) -> str:
 
 def get_answer_status(
     answer: GroundedAnswer,
-) -> Literal["grounded", "insufficient_evidence", "citation_validation_failed"]:
+) -> Literal[
+    "grounded",
+    "insufficient_evidence",
+    "citation_validation_failed",
+    "safety_validation_failed",
+]:
     """Map internal RAG outcomes to a stable, client-safe API status."""
     if not answer.sources:
         return "insufficient_evidence"
@@ -213,12 +221,16 @@ def get_answer_status(
     if answer.citation_validation is not None and not answer.citation_validation.is_valid:
         return "citation_validation_failed"
 
+    if answer.safety_validation is not None and not answer.safety_validation.is_safe:
+        return "safety_validation_failed"
+
     return "grounded"
 
 
 def build_ask_response(answer: GroundedAnswer) -> AskResponse:
     """Convert internal RAG data into the safe JSON response contract."""
     citation_validation = answer.citation_validation
+    safety_validation = answer.safety_validation
 
     return AskResponse(
         status=get_answer_status(answer),
@@ -240,6 +252,12 @@ def build_ask_response(answer: GroundedAnswer) -> AskResponse:
         ),
         citation_validation_errors=(
             list(citation_validation.errors) if citation_validation is not None else []
+        ),
+        safety_validation_passed=(
+            safety_validation.is_safe if safety_validation is not None else None
+        ),
+        safety_validation_errors=(
+            list(safety_validation.errors) if safety_validation is not None else []
         ),
         query_input_tokens=answer.query_input_token_count,
         prompt_tokens=answer.prompt_token_count,
@@ -453,6 +471,7 @@ def ask_question(
                 cached_response.status == "grounded"
                 and cached_response.sources
                 and cached_response.citation_validation_passed is True
+                and cached_response.safety_validation_passed is True
             ):
                 response.headers["X-Cache"] = "HIT"
                 return cached_response
