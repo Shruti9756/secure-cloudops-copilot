@@ -390,12 +390,13 @@
 
 ## Early local AI-security checkpoint — completed 19 August 2026
 
-> This is early local implementation for hands-on security learning. It does not complete V0.6: authentication/RBAC, audit records, Bedrock Guardrails, cloud controls, CI scanning, observability, and deployment security remain future work.
+> This is early local implementation for hands-on security learning. It does not complete V0.6: authentication/RBAC, comprehensive audit coverage, Bedrock Guardrails, cloud controls, CI scanning, observability, and deployment security remain future work.
 
 - [x] Added deterministic output-safety validation for selected unsafe operational recommendations.
 - [x] Added a versioned AI-security evaluation catalogue and automated catalogue validation.
 - [x] Added narrow, deterministic secret redaction before document storage, chunking, embedding, and retrieval.
 - [x] Added tests proving redacted content and non-sensitive redaction metadata reach the ingestion database model.
+- [x] Added PostgreSQL audit events for completed, cached, denied, and failed RAG request paths without recording raw questions or answers.
 - [x] Published this local STRIDE and OWASP LLM-oriented threat model.
 
 ## AI and cloud security

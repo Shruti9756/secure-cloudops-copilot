@@ -85,7 +85,7 @@ Risk ratings describe the current local baseline, not a deployed production envi
 | TM-04 | Elevation of privilege / Excessive agency | A model or MCP client attempts to run shell commands, arbitrary SQL, unrestricted URLs, or AWS actions. | High | The MCP server has a fixed allowlist of read-only tools/resources and a fixed-endpoint API adapter. No arbitrary shell, SQL, URL, or AWS path exists. | MCP currently lacks authenticated user context, audit records, and real AWS telemetry. Add caller identity propagation, audit logging, tool-result authorization, and dedicated read-only IAM roles. |
 | TM-05 | Denial of service / Unbounded consumption | Repeated requests exhaust local model capacity or create excessive model cost. | Medium | Redis fixed-window rate limiting allows 10 requests per 60 seconds; safe grounded answers are cached; Redis failure fails closed for rate limiting. | Limits are IP-based in local development and there are no per-user/tenant quotas, WAF, or cloud alarms. Add authenticated quotas, cost budgets, WAF, and monitoring. |
 | TM-06 | Improper output handling / Misinformation | The model gives an unsupported claim, a bad citation, or an unsafe remediation recommendation. | High | Relevance threshold causes insufficient-evidence responses; citations must match retrieved chunks; output-safety validation blocks selected unsafe actions. | A valid citation does not prove every sentence is correct. Expand evaluation cases, add claim-level grounding checks, and retain human approval for operational changes. |
-| TM-07 | Spoofing and repudiation | A user impersonates another user, or a sensitive action cannot be traced later. | High | Local-only scope; no production access is granted. | Authentication and audit logging are not yet implemented. Add Cognito/JWT, RBAC, immutable audit events, correlation IDs, and CloudTrail in AWS. |
+| TM-07 | Spoofing and repudiation | A user impersonates another user, or a sensitive action cannot be traced later. | High | Local PostgreSQL audit events record completed, cached, denied, and failed ask-request outcomes without raw questions or answers; local-only scope prevents public exposure. | Authentication and user identity are not implemented. Audit coverage does not yet include automatic framework validation failures, MCP activity, document operations, or cloud events. Add Cognito/JWT, RBAC, correlation IDs, broader audit coverage, and CloudTrail in AWS. |
 | TM-08 | Supply chain / configuration tampering | A compromised dependency, container image, or configuration weakens the application. | Medium | `uv.lock` pins resolved Python dependencies; Docker provides reproducible local services; `.env` files are ignored by Git. | No automated dependency, container, IaC, or secret scanning exists yet. Add Gitleaks, Trivy, SBOM generation, image scanning, CI checks, and AWS Secrets Manager. |
 
 ## 7. Current security-test evidence
@@ -99,15 +99,16 @@ The following tests and versioned evaluation data support the controls above:
 | `tests/test_safety.py` | Unsafe restart, rollback, secret-disclosure, and destructive-command recommendations are blocked; negated safety advice remains allowed. |
 | `tests/test_redaction.py` | Common credential-like values are redacted and ordinary content remains unchanged. |
 | `tests/test_ingestion.py` | Ingestion passes safe content and safe redaction metadata to the database model. |
+| `tests/test_audit.py` and `tests/test_ask_endpoint.py` | Safe audit metadata is validated for completed requests, Redis cache hits, and rate-limit denials. |
 | `tests/test_retrieval.py` and API endpoint tests | Retrieval boundaries, relevance threshold behavior, and tenant-scoped query logic are exercised. |
 | `services/mcp-server/tests/` | MCP input validation, fixed API boundaries, read-only tools, resources, and prompts are tested. |
 
-At this checkpoint, the API test suite has **104 passing tests** and the MCP server has its own passing test suite.
+At this checkpoint, the API test suite has **114 passing tests** and the MCP server has its own passing test suite.
 
 ## 8. Prioritized remaining work
 
 1. **Authentication and authorization:** Add Cognito, JWT validation, roles, and authenticated organization context.
-2. **Auditability:** Record document, chat, tool, denied-access, and quota events with correlation IDs.
+2. **Auditability:** Expand the local ask-request audit trail to document, MCP, denied-access, and quota events; add authenticated actor IDs and correlation IDs.
 3. **Broader data protection:** Add PII handling, more secret patterns, safe logging policy, retention policy, and deletion workflow.
 4. **Deeper AI security:** Expand red-team cases for user prompts, retrieved documents, and MCP tool results; evaluate Bedrock Guardrails when Bedrock access is available.
 5. **Cloud controls:** Use IAM task roles, Secrets Manager, KMS, private networking, WAF, CloudTrail, and CI security scanning.

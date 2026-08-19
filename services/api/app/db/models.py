@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -37,6 +38,12 @@ class Tenant(Base):
     documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="tenant",
         cascade="all, delete-orphan",
+    )
+
+    # Audit records are retained even if a tenant is later deleted.
+    audit_events: Mapped[list[AuditEvent]] = relationship(
+        back_populates="tenant",
+        passive_deletes=True,
     )
 
 
@@ -91,6 +98,49 @@ class KnowledgeDocument(Base):
         back_populates="document",
         cascade="all, delete-orphan",
     )
+
+
+class AuditEvent(Base):
+    """An append-only-style record of a security-relevant application event."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        # The common investigation query is: tenant events ordered by newest first.
+        Index("ix_audit_events_tenant_created_at", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+
+    # A login failure can occur before a tenant is known, so this remains nullable.
+    # SET NULL preserves the event if the related tenant is later deleted.
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    # These fields support today's local-demo actor and a future authenticated user.
+    actor_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Never store raw questions, answers, credentials, or tokens in audit metadata.
+    event_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    # No updated_at field: application code will create audit events but never modify them.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    tenant: Mapped[Tenant | None] = relationship(back_populates="audit_events")
 
 
 class DocumentChunk(Base):

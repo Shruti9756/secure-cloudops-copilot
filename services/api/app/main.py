@@ -17,6 +17,7 @@ from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
+from app.services.audit import AuditOutcome, record_audit_event
 from app.services.rag import GroundedAnswer, answer_grounded_question
 from app.services.rate_limit import (
     build_rate_limit_key,
@@ -265,6 +266,48 @@ def build_ask_response(answer: GroundedAnswer) -> AskResponse:
     )
 
 
+def record_ask_audit_event(
+    session: Session,
+    *,
+    event_type: str,
+    outcome: AuditOutcome,
+    audit_status: str,
+    cache_status: str | None,
+    rate_limit_remaining: int | None,
+    ask_response: AskResponse | None = None,
+) -> None:
+    """Record one safe ask-request outcome without logging raw AI content."""
+    audit_tenant = session.scalar(select(Tenant).where(Tenant.slug == DEMO_TENANT_SLUG))
+
+    record_audit_event(
+        session,
+        tenant=audit_tenant,
+        event_type=event_type,
+        outcome=outcome,
+        actor_type="local_demo",
+        actor_id=None,
+        request_id=None,
+        metadata={
+            "audit_status": audit_status,
+            "cache_status": cache_status,
+            "response_status": ask_response.status if ask_response is not None else None,
+            "source_count": len(ask_response.sources) if ask_response is not None else 0,
+            "embedding_model": ask_response.embedding_model if ask_response is not None else None,
+            "generation_model": ask_response.generation_model if ask_response is not None else None,
+            "citation_validation_passed": (
+                ask_response.citation_validation_passed if ask_response is not None else None
+            ),
+            "safety_validation_passed": (
+                ask_response.safety_validation_passed if ask_response is not None else None
+            ),
+            "rate_limit_remaining": rate_limit_remaining,
+        },
+    )
+
+    # The audit event must be durable before this request outcome is considered recorded.
+    session.commit()
+
+
 @app.get("/", response_model=ServiceStatus, include_in_schema=False)
 def root() -> ServiceStatus:
     return get_status()
@@ -410,6 +453,14 @@ def ask_question(
 ) -> AskResponse:
     """Answer one tenant-scoped question through guarded and rate-limited RAG."""
     if not request.question.strip():
+        record_ask_audit_event(
+            session,
+            event_type="rag.answer_request",
+            outcome="denied",
+            audit_status="invalid_question",
+            cache_status=None,
+            rate_limit_remaining=None,
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Question must not be empty",
@@ -429,6 +480,14 @@ def ask_question(
 
     # Unlike caching, a missing rate limiter is a security failure, so fail closed.
     if not rate_limit.is_enforced:
+        record_ask_audit_event(
+            session,
+            event_type="rag.answer_request",
+            outcome="failed",
+            audit_status="rate_limit_unavailable",
+            cache_status=None,
+            rate_limit_remaining=None,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Request protection is temporarily unavailable. Retry shortly.",
@@ -436,6 +495,14 @@ def ask_question(
         )
 
     if not rate_limit.is_allowed:
+        record_ask_audit_event(
+            session,
+            event_type="rag.answer_request",
+            outcome="denied",
+            audit_status="rate_limited",
+            cache_status=None,
+            rate_limit_remaining=0,
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests. Retry after the current rate-limit window.",
@@ -474,6 +541,15 @@ def ask_question(
                 and cached_response.safety_validation_passed is True
             ):
                 response.headers["X-Cache"] = "HIT"
+                record_ask_audit_event(
+                    session,
+                    event_type="rag.answer_completed",
+                    outcome="succeeded",
+                    audit_status="cache_hit",
+                    cache_status="HIT",
+                    rate_limit_remaining=rate_limit.remaining,
+                    ask_response=cached_response,
+                )
                 return cached_response
 
     # Redis problems never block incident investigation; they only disable caching.
@@ -490,6 +566,14 @@ def ask_question(
         )
     except (TimeoutError, URLError) as error:
         # Do not expose local network details to an API client.
+        record_ask_audit_event(
+            session,
+            event_type="rag.answer_request",
+            outcome="failed",
+            audit_status="model_provider_unavailable",
+            cache_status=response.headers["X-Cache"],
+            rate_limit_remaining=rate_limit.remaining,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The local AI provider is unavailable. Check Ollama and retry.",
@@ -504,5 +588,20 @@ def ask_question(
             cache_key=cache_key,
             payload=ask_response.model_dump(mode="json"),
         )
+
+    audit_outcome: AuditOutcome = (
+        "denied"
+        if ask_response.status in {"citation_validation_failed", "safety_validation_failed"}
+        else "succeeded"
+    )
+    record_ask_audit_event(
+        session,
+        event_type="rag.answer_completed",
+        outcome=audit_outcome,
+        audit_status="completed",
+        cache_status=response.headers["X-Cache"],
+        rate_limit_remaining=rate_limit.remaining,
+        ask_response=ask_response,
+    )
 
     return ask_response

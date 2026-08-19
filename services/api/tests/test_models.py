@@ -1,4 +1,4 @@
-from app.db.models import DocumentChunk, KnowledgeDocument, Tenant
+from app.db.models import AuditEvent, DocumentChunk, KnowledgeDocument, Tenant
 
 
 def test_knowledge_document_belongs_to_a_tenant() -> None:
@@ -39,3 +39,17 @@ def test_document_chunk_embedding_is_nullable_and_has_titan_v2_dimensions() -> N
     # Existing chunks are backfilled after this migration, so the column begins nullable.
     assert embedding_column.nullable is True
     assert embedding_column.type.dim == 1024
+
+
+def test_audit_event_preserves_safe_tenant_scoped_security_metadata() -> None:
+    tenant_foreign_key = next(iter(AuditEvent.__table__.foreign_keys))
+    audit_column_names = set(AuditEvent.__table__.c.keys())
+    audit_index_names = {index.name for index in AuditEvent.__table__.indexes}
+
+    assert tenant_foreign_key.target_fullname == "tenants.id"
+    assert tenant_foreign_key.ondelete == "SET NULL"
+    assert AuditEvent.__table__.c.tenant_id.nullable is True
+    assert AuditEvent.__table__.c["metadata"].name == "metadata"
+    assert {"question", "answer", "content"}.isdisjoint(audit_column_names)
+    assert "ix_audit_events_event_type" in audit_index_names
+    assert "ix_audit_events_tenant_created_at" in audit_index_names

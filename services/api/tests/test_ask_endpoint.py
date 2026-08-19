@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from app.db.models import Tenant
 from app.main import (
     app,
     get_chat_provider,
@@ -59,11 +60,20 @@ class FakeRedisCache:
 def install_fake_dependencies(
     *,
     redis_cache: FakeRedisCache | None = None,
+    database_session: Mock | None = None,
 ) -> FakeRedisCache:
     """Make endpoint tests independent from PostgreSQL, Redis, and local Ollama."""
     cache = redis_cache or FakeRedisCache()
 
-    app.dependency_overrides[get_database_session] = lambda: object()
+    if database_session is None:
+        database_session = Mock()
+        database_session.scalar.return_value = Tenant(
+            id=uuid4(),
+            slug="nimbuscart",
+            name="NimbusCart",
+        )
+
+    app.dependency_overrides[get_database_session] = lambda: database_session
     app.dependency_overrides[get_redis_cache] = lambda: cache
     app.dependency_overrides[get_embedding_provider] = lambda: object()
     app.dependency_overrides[get_chat_provider] = lambda: object()
@@ -408,3 +418,143 @@ def test_ask_endpoint_returns_safe_status_for_unsafe_model_output(
     ]
     # Unsafe model output must never be stored for later reuse.
     assert cache.entries == {}
+
+
+def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit_session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    audit_session.scalar.return_value = tenant
+
+    install_fake_dependencies(database_session=audit_session)
+    monkeypatch.setattr(
+        "app.main.answer_grounded_question",
+        lambda **_: make_grounded_answer(),
+    )
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={
+                "question": "Why did checkout latency increase?",
+                "limit": 2,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_event = audit_session.add.call_args.args[0]
+
+    assert response.status_code == 200
+    assert response.headers["x-cache"] == "MISS"
+    assert audit_event.tenant_id == tenant.id
+    assert audit_event.event_type == "rag.answer_completed"
+    assert audit_event.outcome == "succeeded"
+    assert audit_event.actor_type == "local_demo"
+    assert audit_event.event_metadata == {
+        "audit_status": "completed",
+        "cache_status": "MISS",
+        "response_status": "grounded",
+        "source_count": 1,
+        "embedding_model": "test-embedding-model-v1",
+        "generation_model": "test-chat-model-v1",
+        "citation_validation_passed": True,
+        "safety_validation_passed": True,
+        "rate_limit_remaining": 9,
+    }
+    assert "question" not in audit_event.event_metadata
+    assert "answer" not in audit_event.event_metadata
+    audit_session.commit.assert_called_once()
+
+
+def test_ask_endpoint_audits_cache_hits_without_repeating_rag_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit_session = Mock()
+    audit_session.scalar.return_value = Tenant(
+        id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    cache = FakeRedisCache()
+    rag_call = Mock(return_value=make_grounded_answer())
+
+    install_fake_dependencies(
+        redis_cache=cache,
+        database_session=audit_session,
+    )
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        first_response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?", "limit": 2},
+        )
+        second_response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?", "limit": 2},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_events = [call.args[0] for call in audit_session.add.call_args_list]
+
+    assert first_response.headers["x-cache"] == "MISS"
+    assert second_response.headers["x-cache"] == "HIT"
+    assert rag_call.call_count == 1
+    assert len(audit_events) == 2
+    assert [event.event_metadata["cache_status"] for event in audit_events] == [
+        "MISS",
+        "HIT",
+    ]
+    assert [event.event_metadata["audit_status"] for event in audit_events] == [
+        "completed",
+        "cache_hit",
+    ]
+    assert audit_session.commit.call_count == 2
+
+
+def test_ask_endpoint_audits_rate_limit_denials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit_session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    audit_session.scalar.return_value = tenant
+    cache = FakeRedisCache(rate_limit_result=(11, 23))
+    rag_call = Mock()
+
+    install_fake_dependencies(
+        redis_cache=cache,
+        database_session=audit_session,
+    )
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_event = audit_session.add.call_args.args[0]
+
+    assert response.status_code == 429
+    assert audit_event.tenant_id == tenant.id
+    assert audit_event.event_type == "rag.answer_request"
+    assert audit_event.outcome == "denied"
+    assert audit_event.event_metadata["audit_status"] == "rate_limited"
+    assert audit_event.event_metadata["cache_status"] is None
+    assert audit_event.event_metadata["rate_limit_remaining"] == 0
+    assert "question" not in audit_event.event_metadata
+    rag_call.assert_not_called()
+    audit_session.commit.assert_called_once()
