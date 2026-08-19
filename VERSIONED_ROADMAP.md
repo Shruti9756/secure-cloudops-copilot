@@ -388,6 +388,16 @@
 
 **Purpose:** Make the system observable, resilient, and defensible.
 
+## Early local AI-security checkpoint — completed 19 August 2026
+
+> This is early local implementation for hands-on security learning. It does not complete V0.6: authentication/RBAC, audit records, Bedrock Guardrails, cloud controls, CI scanning, observability, and deployment security remain future work.
+
+- [x] Added deterministic output-safety validation for selected unsafe operational recommendations.
+- [x] Added a versioned AI-security evaluation catalogue and automated catalogue validation.
+- [x] Added narrow, deterministic secret redaction before document storage, chunking, embedding, and retrieval.
+- [x] Added tests proving redacted content and non-sensitive redaction metadata reach the ingestion database model.
+- [x] Published this local STRIDE and OWASP LLM-oriented threat model.
+
 ## AI and cloud security
 
 - [ ] Write a threat model using STRIDE and OWASP LLM Top 10.
