@@ -1,6 +1,7 @@
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Annotated, Literal
 from urllib.error import URLError
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi import Path as ApiPath
@@ -146,8 +147,25 @@ app.add_middleware(
         "X-RateLimit-Limit",
         "X-RateLimit-Remaining",
         "X-RateLimit-Reset",
+        "X-Request-ID",
     ],
 )
+
+
+@app.middleware("http")
+async def add_server_generated_request_id(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Attach one server-generated ID to every request and its response."""
+    # Never trust a client-supplied correlation ID in this local security baseline.
+    request_id = uuid4().hex
+    request.state.request_id = request_id
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+
+    return response
 
 
 def get_status() -> ServiceStatus:
@@ -269,6 +287,7 @@ def build_ask_response(answer: GroundedAnswer) -> AskResponse:
 def record_ask_audit_event(
     session: Session,
     *,
+    request_id: str,
     event_type: str,
     outcome: AuditOutcome,
     audit_status: str,
@@ -286,7 +305,7 @@ def record_ask_audit_event(
         outcome=outcome,
         actor_type="local_demo",
         actor_id=None,
-        request_id=None,
+        request_id=request_id,
         metadata={
             "audit_status": audit_status,
             "cache_status": cache_status,
@@ -455,6 +474,7 @@ def ask_question(
     if not request.question.strip():
         record_ask_audit_event(
             session,
+            request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="denied",
             audit_status="invalid_question",
@@ -482,6 +502,7 @@ def ask_question(
     if not rate_limit.is_enforced:
         record_ask_audit_event(
             session,
+            request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="failed",
             audit_status="rate_limit_unavailable",
@@ -497,6 +518,7 @@ def ask_question(
     if not rate_limit.is_allowed:
         record_ask_audit_event(
             session,
+            request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="denied",
             audit_status="rate_limited",
@@ -549,6 +571,7 @@ def ask_question(
                     cache_status="HIT",
                     rate_limit_remaining=rate_limit.remaining,
                     ask_response=cached_response,
+                    request_id=http_request.state.request_id,
                 )
                 return cached_response
 
@@ -573,6 +596,7 @@ def ask_question(
             audit_status="model_provider_unavailable",
             cache_status=response.headers["X-Cache"],
             rate_limit_remaining=rate_limit.remaining,
+            request_id=http_request.state.request_id,
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -602,6 +626,7 @@ def ask_question(
         cache_status=response.headers["X-Cache"],
         rate_limit_remaining=rate_limit.remaining,
         ask_response=ask_response,
+        request_id=http_request.state.request_id,
     )
 
     return ask_response

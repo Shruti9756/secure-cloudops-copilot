@@ -456,6 +456,7 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
     assert audit_event.event_type == "rag.answer_completed"
     assert audit_event.outcome == "succeeded"
     assert audit_event.actor_type == "local_demo"
+    assert audit_event.request_id == response.headers["x-request-id"]
     assert audit_event.event_metadata == {
         "audit_status": "completed",
         "cache_status": "MISS",

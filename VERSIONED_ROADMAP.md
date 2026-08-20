@@ -398,6 +398,7 @@
 - [x] Added tests proving redacted content and non-sensitive redaction metadata reach the ingestion database model.
 - [x] Added PostgreSQL audit events for completed, cached, denied, and failed RAG request paths without recording raw questions or answers.
 - [x] Published this local STRIDE and OWASP LLM-oriented threat model.
+- [x] Added server-generated request IDs to API responses and linked each handled RAG request outcome to its audit event.
 
 ## AI and cloud security
 

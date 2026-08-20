@@ -50,3 +50,4 @@ def test_cors_exposes_the_cache_header_to_approved_browsers() -> None:
     assert "x-ratelimit-limit" in exposed_headers
     assert "x-ratelimit-remaining" in exposed_headers
     assert "x-ratelimit-reset" in exposed_headers
+    assert "x-request-id" in exposed_headers
