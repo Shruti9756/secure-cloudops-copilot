@@ -388,7 +388,7 @@
 
 **Purpose:** Make the system observable, resilient, and defensible.
 
-## Early local AI-security checkpoint — completed 19 August 2026
+## Early local AI-security checkpoint — updated 20 August 2026
 
 > This is early local implementation for hands-on security learning. It does not complete V0.6: authentication/RBAC, comprehensive audit coverage, Bedrock Guardrails, cloud controls, CI scanning, observability, and deployment security remain future work.
 
@@ -396,9 +396,11 @@
 - [x] Added a versioned AI-security evaluation catalogue and automated catalogue validation.
 - [x] Added narrow, deterministic secret redaction before document storage, chunking, embedding, and retrieval.
 - [x] Added tests proving redacted content and non-sensitive redaction metadata reach the ingestion database model.
-- [x] Added PostgreSQL audit events for completed, cached, denied, and failed RAG request paths without recording raw questions or answers.
+- [x] Added PostgreSQL audit events for completed, cached, denied, and failed RAG request paths, plus accepted and denied Markdown/TXT document uploads, without recording raw questions, answers, uploaded document bodies, or redacted secrets.
+- [x] Added a safe API document-upload path: strict Markdown/TXT validation, UTF-8 and size checks, stable source paths, secret redaction before PostgreSQL storage, and request-ID-linked audit events.
 - [x] Published this local STRIDE and OWASP LLM-oriented threat model.
 - [x] Added server-generated request IDs to API responses and linked each handled RAG request outcome to its audit event.
+
 
 ## AI and cloud security
 

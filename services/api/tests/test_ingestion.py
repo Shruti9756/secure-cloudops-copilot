@@ -48,6 +48,8 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
             "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF\n"
             "Authorization: Bearer example-token-123"
         ),
+        ingestion_source="api-upload",
+        content_type="text/markdown",
     )
 
     stored_document = session.add.call_args.args[0]
@@ -65,7 +67,7 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
     assert stored_document.source_sha256 == calculate_content_sha256(stored_document.content)
     assert stored_document.document_metadata == {
         "content_type": "text/markdown",
-        "ingestion_source": "local-demo-data",
+        "ingestion_source": "api-upload",
         "redaction": {
             "applied": True,
             "count": 2,

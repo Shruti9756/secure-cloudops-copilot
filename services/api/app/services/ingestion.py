@@ -32,11 +32,16 @@ def extract_markdown_title(content: str, fallback: str) -> str:
     return fallback
 
 
-def _document_metadata_for(redaction_result: RedactionResult) -> dict[str, object]:
+def _document_metadata_for(
+    redaction_result: RedactionResult,
+    *,
+    ingestion_source: str,
+    content_type: str,
+) -> dict[str, object]:
     """Build safe ingestion metadata without preserving any original secret values."""
     return {
-        "content_type": "text/markdown",
-        "ingestion_source": "local-demo-data",
+        "content_type": content_type,
+        "ingestion_source": ingestion_source,
         "redaction": {
             "applied": redaction_result.redaction_count > 0,
             "count": redaction_result.redaction_count,
@@ -61,6 +66,8 @@ def ingest_document(
     tenant: Tenant,
     source_path: str,
     content: str,
+    ingestion_source: str = "local-demo-data",
+    content_type: str = "text/markdown",
 ) -> IngestionResult:
     # Redact before hashing, storing, chunking, embedding, or retrieving document content.
     redaction_result = redact_secrets(content)
@@ -84,7 +91,11 @@ def ingest_document(
                 source_sha256=content_hash,
                 content=safe_content,
                 ingestion_status="pending",
-                document_metadata=_document_metadata_for(redaction_result),
+                document_metadata=_document_metadata_for(
+                    redaction_result,
+                    ingestion_source=ingestion_source,
+                    content_type=content_type,
+                ),
             )
         )
 
@@ -100,7 +111,13 @@ def ingest_document(
     # Existing chunks describe older content and must not be retrieved after an update.
     document.chunks.clear()
     document.ingestion_status = "pending"
-    document.document_metadata = _document_metadata_for(redaction_result)
+    document.document_metadata = (
+        _document_metadata_for(
+            redaction_result,
+            ingestion_source=ingestion_source,
+            content_type=content_type,
+        ),
+    )
 
     return IngestionResult(action="updated", source_path=source_path)
 

@@ -3,7 +3,16 @@ from typing import Annotated, Literal
 from urllib.error import URLError
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi import Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
@@ -19,6 +28,7 @@ from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.services.audit import AuditOutcome, record_audit_event
+from app.services.ingestion import get_or_create_tenant, ingest_document
 from app.services.rag import GroundedAnswer, answer_grounded_question
 from app.services.rate_limit import (
     build_rate_limit_key,
@@ -30,6 +40,10 @@ from app.services.response_cache import (
     store_cached_response,
 )
 from app.services.retrieval import DEFAULT_RETRIEVAL_LIMIT, MAX_RETRIEVAL_LIMIT
+from app.services.upload_validation import (
+    MAX_TEXT_UPLOAD_BYTES,
+    validate_and_decode_text_upload,
+)
 
 APP_VERSION = "0.1.0"
 
@@ -105,6 +119,15 @@ class AskResponse(BaseModel):
     query_input_tokens: int
     prompt_tokens: int | None
     completion_tokens: int | None
+
+
+class DocumentUploadResponse(BaseModel):
+    """Safe API response after a text document enters the ingestion pipeline."""
+
+    status: Literal["accepted"]
+    action: Literal["created", "updated", "unchanged"]
+    tenant: str
+    source_path: str
 
 
 class DeploymentContextResponse(BaseModel):
@@ -327,6 +350,35 @@ def record_ask_audit_event(
     session.commit()
 
 
+def record_document_upload_audit_event(
+    session: Session,
+    *,
+    tenant: Tenant | None,
+    request_id: str,
+    outcome: AuditOutcome,
+    upload_status: str,
+    source_path: str | None,
+    content_type: str | None,
+    ingestion_action: str | None,
+) -> None:
+    """Record a document-upload outcome without storing a filename or document content."""
+    record_audit_event(
+        session,
+        tenant=tenant,
+        event_type="document.upload",
+        outcome=outcome,
+        actor_type="local_demo",
+        actor_id=None,
+        request_id=request_id,
+        metadata={
+            "upload_status": upload_status,
+            "source_path": source_path,
+            "content_type": content_type,
+            "ingestion_action": ingestion_action,
+        },
+    )
+
+
 @app.get("/", response_model=ServiceStatus, include_in_schema=False)
 def root() -> ServiceStatus:
     return get_status()
@@ -350,6 +402,88 @@ def readiness_check(response: Response) -> ReadinessStatus:
 @app.get("/api/v1/status", response_model=ServiceStatus, tags=["system"])
 def api_status() -> ServiceStatus:
     return get_status()
+
+
+@app.post(
+    "/api/v1/documents",
+    response_model=DocumentUploadResponse,
+    tags=["documents"],
+)
+async def upload_text_document(
+    http_request: Request,
+    uploaded_file: Annotated[
+        UploadFile,
+        File(
+            description=(
+                "A UTF-8 Markdown (.md) or plain-text (.txt) knowledge document. "
+                "Maximum size: 1 MB."
+            )
+        ),
+    ],
+    session: Annotated[Session, Depends(get_database_session)],
+) -> DocumentUploadResponse:
+    """Validate and ingest one local text document into the server-controlled tenant."""
+    # Read one additional byte, allowing validation to reject oversized files safely.
+    try:
+        content_bytes = await uploaded_file.read(MAX_TEXT_UPLOAD_BYTES + 1)
+    finally:
+        await uploaded_file.close()
+
+    try:
+        validated_upload = validate_and_decode_text_upload(
+            filename=uploaded_file.filename,
+            content_bytes=content_bytes,
+        )
+    except ValueError as error:
+        record_document_upload_audit_event(
+            session,
+            tenant=None,
+            request_id=http_request.state.request_id,
+            outcome="denied",
+            upload_status="validation_failed",
+            source_path=None,
+            content_type=None,
+            ingestion_action=None,
+        )
+        session.commit()
+
+        # Validation details are safe because they never include uploaded file content.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+
+    tenant = get_or_create_tenant(
+        session,
+        slug=DEMO_TENANT_SLUG,
+        name="NimbusCart",
+    )
+    ingestion_result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path=validated_upload.source_path,
+        content=validated_upload.content,
+        ingestion_source="api-upload",
+        content_type=validated_upload.content_type,
+    )
+    record_document_upload_audit_event(
+        session,
+        tenant=tenant,
+        request_id=http_request.state.request_id,
+        outcome="succeeded",
+        upload_status="accepted",
+        source_path=validated_upload.source_path,
+        content_type=validated_upload.content_type,
+        ingestion_action=ingestion_result.action,
+    )
+    session.commit()
+
+    return DocumentUploadResponse(
+        status="accepted",
+        action=ingestion_result.action,
+        tenant=DEMO_TENANT_SLUG,
+        source_path=ingestion_result.source_path,
+    )
 
 
 @app.get(
