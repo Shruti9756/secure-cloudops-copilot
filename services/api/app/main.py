@@ -130,6 +130,21 @@ class DocumentUploadResponse(BaseModel):
     source_path: str
 
 
+class DocumentStatusItemResponse(BaseModel):
+    """Safe lifecycle information for one tenant-scoped knowledge document."""
+
+    source_path: str
+    title: str
+    ingestion_status: Literal["pending", "chunked", "embedded"]
+
+
+class DocumentStatusListResponse(BaseModel):
+    """A safe document list for the local tenant; document bodies stay private."""
+
+    tenant: str
+    documents: list[DocumentStatusItemResponse]
+
+
 class DeploymentContextResponse(BaseModel):
     """Approved deployment context returned through a server-scoped read-only route."""
 
@@ -483,6 +498,38 @@ async def upload_text_document(
         action=ingestion_result.action,
         tenant=DEMO_TENANT_SLUG,
         source_path=ingestion_result.source_path,
+    )
+
+
+@app.get(
+    "/api/v1/documents",
+    response_model=DocumentStatusListResponse,
+    tags=["documents"],
+)
+def list_document_statuses(
+    session: Annotated[Session, Depends(get_database_session)],
+) -> DocumentStatusListResponse:
+    """List safe processing statuses for documents in the server-controlled tenant."""
+
+    statement = (
+        select(KnowledgeDocument)
+        .join(Tenant)
+        .where(Tenant.slug == DEMO_TENANT_SLUG)
+        .order_by(KnowledgeDocument.source_path)
+    )
+    documents = list(session.scalars(statement))
+
+    # Never expose document content, chunks, vectors, hashes, or redaction metadata here.
+    return DocumentStatusListResponse(
+        tenant=DEMO_TENANT_SLUG,
+        documents=[
+            DocumentStatusItemResponse(
+                source_path=document.source_path,
+                title=document.title,
+                ingestion_status=document.ingestion_status,
+            )
+            for document in documents
+        ],
     )
 
 
