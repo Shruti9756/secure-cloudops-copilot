@@ -1,0 +1,92 @@
+name: Continuous Integration
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Each job receives only permission to read repository contents.
+permissions:
+  contents: read
+
+jobs:
+  api-quality:
+    name: API quality and tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/api
+
+    # Safe placeholder configuration so test code can load settings.
+    # The CI job does not connect to real AWS, PostgreSQL, Redis, or Ollama.
+    env:
+      DATABASE_URL: postgresql+psycopg://securecloudops:securecloudops@localhost:5432/securecloudops
+      REDIS_URL: redis://localhost:6379/0
+      OLLAMA_BASE_URL: http://localhost:11434
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - name: Install API dependencies from the lockfile
+        run: uv sync --locked --dev
+
+      - name: Check Python formatting
+        run: uv run ruff format --check .
+
+      - name: Lint Python
+        run: uv run ruff check .
+
+      - name: Run API tests
+        run: uv run python -m pytest -q
+
+  web-quality:
+    name: Web quality and build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies from the lockfile
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out complete Git history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Scan for accidentally committed secrets
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
