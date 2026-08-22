@@ -1,33 +1,45 @@
 # SecureCloudOps Copilot
 
-A secure, multi-tenant AI copilot for AWS incident investigation.
+SecureCloudOps Copilot is a security-focused AI assistant for investigating cloud and production incidents from approved engineering knowledge.
 
-Engineering teams can upload runbooks, postmortems, architecture documents, and deployment records. The copilot uses Retrieval-Augmented Generation (RAG) to return grounded answers with citations, and later uses secure Model Context Protocol (MCP) tools to inspect approved operational context.
+It lets an engineering team upload synthetic runbooks, deployment records, Markdown, TXT, digital PDF, and DOCX documents; process them into vector embeddings; and ask grounded questions that return source citations instead of unsupported answers.
 
-## Core capabilities
+> This repository uses only synthetic NimbusCart demonstration data. Never upload real production documents, credentials, customer data, or AWS keys.
 
-- Cited RAG over engineering knowledge
-- Multi-tenant access control and auditability
-- Redis caching, rate limiting, and job coordination
-- Custom MCP tools with least-privilege access
-- AWS deployment using Docker, ECS, Bedrock, S3, RDS, and Terraform
-- AI security: prompt-injection defense, PII protection, output validation, and guardrails
-- Observability, testing, CI/CD, and infrastructure as code
+## What works today
 
-## Project status
+- Next.js and TypeScript investigation UI
+- FastAPI API with OpenAPI documentation
+- PostgreSQL + pgvector knowledge store
+- Redis response cache and request rate limiting
+- Local Ollama embeddings (`mxbai-embed-large`) and generation (`qwen3:4b-instruct`)
+- Cited RAG answers with relevance thresholds and safe abstention
+- Citation validation and deterministic output-safety validation
+- Secret redaction before document storage, chunking, embedding, and retrieval
+- Markdown, TXT, digital PDF, and DOCX document uploads
+- Background Docker worker for automatic chunking and embedding
+- PostgreSQL audit events correlated through server-generated request IDs
+- Custom read-only MCP server with approved knowledge, deployment, and runbook access
+- Prometheus API/RAG metrics and a local Grafana dashboard
+- GitHub Actions checks for API tests, web lint/build, and committed-secret scanning
 
-Current version: **V0.0 — Project Foundation**
+## Local architecture
 
-The version-by-version implementation plan is available in [VERSIONED_ROADMAP.md](VERSIONED_ROADMAP.md).
+```mermaid
+flowchart LR
+    UI["Next.js web UI"] --> API["FastAPI API"]
+    MCP["Custom read-only MCP server"] --> API
 
-## Architecture
+    API --> Redis["Redis<br/>cache + rate limits"]
+    API --> DB["PostgreSQL + pgvector<br/>documents, chunks, vectors, audits"]
 
-> Architecture diagrams will be added as the system is implemented.
+    API --> Ollama["Ollama<br/>embeddings + chat"]
+    Worker["Background worker"] --> DB
+    Worker --> Ollama
 
-## Technology stack
+    Prometheus["Prometheus"] --> API
+    Grafana["Grafana"] --> Prometheus
 
-Next.js, TypeScript, FastAPI, Python, PostgreSQL, pgvector, Redis, Docker, Amazon Bedrock, Amazon S3, Amazon ECS, Terraform, MCP, OpenTelemetry, GitHub Actions.
+    AWS["AWS target<br/>ECS, RDS, S3, Bedrock, Terraform"]:::future
 
-## Security note
-
-This project uses only synthetic demonstration documents. Never commit credentials, AWS keys, real customer data, or production documents.
+    classDef future fill:#1e293b,color:#cbd5e1,stroke:#64748b;

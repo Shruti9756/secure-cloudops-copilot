@@ -48,8 +48,8 @@ from app.services.response_cache import (
 )
 from app.services.retrieval import DEFAULT_RETRIEVAL_LIMIT, MAX_RETRIEVAL_LIMIT
 from app.services.upload_validation import (
-    MAX_TEXT_UPLOAD_BYTES,
-    validate_and_decode_text_upload,
+    MAX_DOCUMENT_UPLOAD_BYTES,
+    validate_and_extract_upload,
 )
 
 APP_VERSION = "0.1.0"
@@ -466,28 +466,29 @@ def api_status() -> ServiceStatus:
     response_model=DocumentUploadResponse,
     tags=["documents"],
 )
-async def upload_text_document(
+async def upload_document(
     http_request: Request,
     uploaded_file: Annotated[
         UploadFile,
         File(
             description=(
-                "A UTF-8 Markdown (.md) or plain-text (.txt) knowledge document. "
-                "Maximum size: 1 MB."
+                "A Markdown (.md), plain-text (.txt), digital PDF (.pdf), or "
+                "Word DOCX (.docx) knowledge document. PDFs must contain "
+                "selectable text. Maximum raw file size: 1 MB."
             )
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
 ) -> DocumentUploadResponse:
-    """Validate and ingest one local text document into the server-controlled tenant."""
+    """Validate and ingest one supported document for the server-controlled tenant."""
     # Read one additional byte, allowing validation to reject oversized files safely.
     try:
-        content_bytes = await uploaded_file.read(MAX_TEXT_UPLOAD_BYTES + 1)
+        content_bytes = await uploaded_file.read(MAX_DOCUMENT_UPLOAD_BYTES + 1)
     finally:
         await uploaded_file.close()
 
     try:
-        validated_upload = validate_and_decode_text_upload(
+        validated_upload = validate_and_extract_upload(
             filename=uploaded_file.filename,
             content_bytes=content_bytes,
         )

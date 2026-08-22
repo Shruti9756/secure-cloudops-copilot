@@ -1,15 +1,19 @@
-"""Validation and decoding for safe local text-document uploads."""
+"""Validation and metadata creation for safe local document uploads."""
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-ALLOWED_TEXT_UPLOAD_EXTENSIONS = frozenset({".md", ".txt"})
-MAX_TEXT_UPLOAD_BYTES = 1_000_000
+from app.services.document_extraction import extract_document_text
 
-TEXT_UPLOAD_CONTENT_TYPES = {
+ALLOWED_DOCUMENT_UPLOAD_EXTENSIONS = frozenset({".md", ".txt", ".pdf", ".docx"})
+MAX_DOCUMENT_UPLOAD_BYTES = 1_000_000
+
+DOCUMENT_UPLOAD_CONTENT_TYPES = {
     ".md": "text/markdown",
     ".txt": "text/plain",
+    ".pdf": "application/pdf",
+    ".docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
 }
 
 # Source paths become stable database identifiers, so they use a small safe character set.
@@ -17,8 +21,8 @@ UNSAFE_SOURCE_COMPONENT_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 @dataclass(frozen=True)
-class ValidatedTextUpload:
-    """A UTF-8 text upload that is safe to pass into the ingestion pipeline."""
+class ValidatedDocumentUpload:
+    """A validated document whose extracted text is safe to pass to ingestion."""
 
     original_filename: str
     source_path: str
@@ -26,36 +30,35 @@ class ValidatedTextUpload:
     content: str
 
 
-def validate_and_decode_text_upload(
+def validate_and_extract_upload(
     *,
     filename: str | None,
     content_bytes: bytes,
-) -> ValidatedTextUpload:
-    """Validate an allowed text file and create a server-controlled source path."""
+) -> ValidatedDocumentUpload:
+    """Validate metadata and extract bounded plain text from one allowed file."""
     safe_filename = _build_safe_filename(filename)
+    original_filename = (filename or "").strip()
 
     if not content_bytes:
         raise ValueError("Uploaded file must not be empty")
 
-    if len(content_bytes) > MAX_TEXT_UPLOAD_BYTES:
+    if len(content_bytes) > MAX_DOCUMENT_UPLOAD_BYTES:
         raise ValueError(
-            f"Uploaded file exceeds the {MAX_TEXT_UPLOAD_BYTES} byte text-upload limit"
+            f"Uploaded file exceeds the {MAX_DOCUMENT_UPLOAD_BYTES} byte document-upload limit"
         )
-
-    try:
-        content = content_bytes.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise ValueError("Uploaded file must be valid UTF-8 text") from error
-
-    if not content.strip():
-        raise ValueError("Uploaded file must not contain only whitespace")
 
     suffix = Path(safe_filename).suffix
 
-    return ValidatedTextUpload(
-        original_filename=filename.strip(),
+    # The extension is server-validated before selecting a parser.
+    content = extract_document_text(
+        suffix=suffix,
+        content_bytes=content_bytes,
+    )
+
+    return ValidatedDocumentUpload(
+        original_filename=original_filename,
         source_path=f"uploads/{safe_filename}",
-        content_type=TEXT_UPLOAD_CONTENT_TYPES[suffix],
+        content_type=DOCUMENT_UPLOAD_CONTENT_TYPES[suffix],
         content=content,
     )
 
@@ -72,8 +75,8 @@ def _build_safe_filename(filename: str | None) -> str:
         raise ValueError("Uploaded filename must not include a path")
 
     suffix = Path(normalized_filename).suffix.lower()
-    if suffix not in ALLOWED_TEXT_UPLOAD_EXTENSIONS:
-        raise ValueError("Only .md and .txt uploads are supported")
+    if suffix not in ALLOWED_DOCUMENT_UPLOAD_EXTENSIONS:
+        raise ValueError("Only .md, .txt, .pdf, and .docx uploads are supported")
 
     normalized_stem = UNSAFE_SOURCE_COMPONENT_PATTERN.sub(
         "-",
