@@ -212,6 +212,20 @@
 
 **Purpose:** Improve quality, performance, and resilience using evidence.
 
+## Early local processing checkpoint — completed 22 August 2026
+
+> This is an early local implementation to make the V0.1 upload experience automatic. It does not complete V0.3: there is no durable job queue, Redis lock, exponential backoff, persisted failure reason, authenticated job authorization, or AWS SQS/DLQ integration yet.
+
+- [x] Added a separate local Docker Compose worker container with no exposed HTTP port.
+- [x] Reused the API image and locked dependencies while running a separate `python -m app.worker` process.
+- [x] Added tenant-scoped polling for pending documents with a configurable five-second local interval.
+- [x] Reused the tested chunking and local Ollama embedding services rather than duplicating RAG logic.
+- [x] Added an explicit SQLAlchemy transaction flush so one worker cycle can safely perform `pending → chunked → embedded` before commit.
+- [x] Kept each processing cycle transactional: an embedding failure rolls back derived chunk/vector writes and allows a later retry.
+- [x] Logged safe operational counts only—never document content, embeddings, or secrets.
+- [x] Added unit tests for tenant scoping, invalid worker configuration, and transaction boundaries: API suite at 131 passing tests.
+- [x] Verified live that an uploaded document was automatically chunked and embedded by the worker without manual processing commands.
+
 ## Reliable ingestion and Redis
 
 - [ ] Move document processing to a dedicated background-worker flow.
@@ -250,8 +264,6 @@
 - [ ] Ingestion is asynchronous, retryable, and idempotent.
 - [ ] At least one retrieval improvement is backed by a reproducible measurement.
 - [ ] The README/evaluation report explains quality, latency, and cost tradeoffs.
-
----
 
 # V0.4 — AWS cloud platform
 

@@ -19,6 +19,29 @@ services:
       redis:
         condition: service_healthy
 
+  worker:
+    # Reuse the API image because the worker uses the same RAG services and locked dependencies.
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
+      DOCUMENT_PROCESSOR_TENANT_SLUG: nimbuscart
+      DOCUMENT_PROCESSOR_POLL_INTERVAL_SECONDS: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    # The shared API Dockerfile checks port 8000; a worker intentionally exposes no HTTP port.
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
   postgres:
     image: pgvector/pgvector:0.8.2-pg17-bookworm
     environment:
