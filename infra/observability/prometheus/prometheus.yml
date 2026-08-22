@@ -1,0 +1,13 @@
+global:
+  # Short local interval so dashboard changes are visible during development.
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: secure-cloudops-api
+    metrics_path: /metrics
+    static_configs:
+      # Docker Compose resolves the API service by its service name.
+      # Never use 127.0.0.1 here: inside Prometheus that means the Prometheus container.
+      - targets:
+          - api:8000

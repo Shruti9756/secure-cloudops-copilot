@@ -1,0 +1,14 @@
+apiVersion: 1
+
+# Remove this source if its provisioning file is later removed.
+prune: true
+
+datasources:
+  - name: SecureCloudOps Prometheus
+    uid: secure-cloudops-prometheus
+    type: prometheus
+    access: proxy
+    # Grafana reaches Prometheus through the private Docker network.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
