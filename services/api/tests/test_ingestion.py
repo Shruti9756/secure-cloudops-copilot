@@ -1,12 +1,52 @@
 from unittest.mock import Mock
 from uuid import uuid4
 
+import pytest
+
 from app.db.models import KnowledgeDocument, Tenant
+from app.infrastructure.s3 import S3DocumentReference
 from app.services.ingestion import (
     calculate_content_sha256,
     extract_markdown_title,
     ingest_document,
 )
+
+
+class FakeRedactedDocumentStore:
+    """In-memory object store proving ingestion sends only redacted text."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[dict[str, str]] = []
+        self.error = error
+
+    def store_redacted_document(
+        self,
+        *,
+        tenant_slug: str,
+        source_path: str,
+        redacted_content: str,
+        content_sha256: str,
+    ) -> S3DocumentReference:
+        self.calls.append(
+            {
+                "tenant_slug": tenant_slug,
+                "source_path": source_path,
+                "redacted_content": redacted_content,
+                "content_sha256": content_sha256,
+            }
+        )
+
+        if self.error is not None:
+            raise self.error
+
+        return S3DocumentReference(
+            bucket_name="secure-cloudops-test",
+            object_key=(
+                "tenants/nimbuscart/redacted-documents/uploads/redis-investigation.pdf.txt"
+            ),
+            version_id="test-version-1",
+            e_tag='"test-etag"',
+        )
 
 
 def test_content_hash_is_deterministic() -> None:
@@ -74,3 +114,65 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
             "types": ["AWS_ACCESS_KEY_ID", "BEARER_TOKEN"],
         },
     }
+
+
+def test_ingest_document_mirrors_only_redacted_content_when_store_is_configured() -> None:
+    """Object storage receives safe text before the database receives the document."""
+    session = Mock()
+    session.scalar.return_value = None
+    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    document_store = FakeRedactedDocumentStore()
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="uploads/redis-investigation.pdf",
+        content=("Authorization: Bearer example-token-123\nInspect Redis eviction policy."),
+        ingestion_source="api-upload",
+        content_type="application/pdf",
+        document_store=document_store,
+    )
+
+    stored_document = session.add.call_args.args[0]
+    expected_safe_content = (
+        "Authorization: Bearer [REDACTED: BEARER_TOKEN]\nInspect Redis eviction policy."
+    )
+
+    assert result.action == "created"
+    assert document_store.calls == [
+        {
+            "tenant_slug": "nimbuscart",
+            "source_path": "uploads/redis-investigation.pdf",
+            "redacted_content": expected_safe_content,
+            "content_sha256": calculate_content_sha256(expected_safe_content),
+        }
+    ]
+    assert "example-token-123" not in document_store.calls[0]["redacted_content"]
+    assert stored_document.document_metadata["redacted_text_storage"] == {
+        "provider": "s3",
+        "bucket_name": "secure-cloudops-test",
+        "object_key": ("tenants/nimbuscart/redacted-documents/uploads/redis-investigation.pdf.txt"),
+        "version_id": "test-version-1",
+        "e_tag": '"test-etag"',
+    }
+
+
+def test_ingest_document_does_not_change_database_when_storage_mirror_fails() -> None:
+    """A configured durable-storage failure must prevent a partial ingestion write."""
+    session = Mock()
+    session.scalar.return_value = None
+    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    document_store = FakeRedactedDocumentStore(
+        error=RuntimeError("S3 is unavailable"),
+    )
+
+    with pytest.raises(RuntimeError, match="S3 is unavailable"):
+        ingest_document(
+            session=session,
+            tenant=tenant,
+            source_path="uploads/redis-investigation.pdf",
+            content="Inspect Redis eviction policy.",
+            document_store=document_store,
+        )
+
+    session.add.assert_not_called()

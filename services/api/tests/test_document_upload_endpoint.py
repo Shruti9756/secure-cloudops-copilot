@@ -5,9 +5,25 @@ import pymupdf
 from fastapi.testclient import TestClient
 
 from app.db.models import AuditEvent, KnowledgeDocument, Tenant
+from app.infrastructure.s3 import S3DocumentStorageUnavailableError
 from app.main import app, get_database_session
+from app.services.document_storage import get_redacted_document_store
 
 client = TestClient(app)
+
+
+class UnavailableRedactedDocumentStore:
+    """Fake configured storage that proves the endpoint fails safely."""
+
+    def store_redacted_document(
+        self,
+        *,
+        tenant_slug: str,
+        source_path: str,
+        redacted_content: str,
+        content_sha256: str,
+    ) -> None:
+        raise S3DocumentStorageUnavailableError("S3 document storage is unavailable")
 
 
 def make_pdf_upload_bytes() -> bytes:
@@ -34,6 +50,7 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
     # First query finds the tenant; second query confirms this source path is new.
     session.scalar.side_effect = [tenant, None]
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
         response = client.post(
@@ -102,6 +119,7 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
 def test_document_upload_rejects_and_audits_unsupported_files() -> None:
     session = Mock()
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
         response = client.post(
@@ -145,6 +163,7 @@ def test_document_upload_extracts_redacts_and_audits_pdf_content() -> None:
     )
     session.scalar.side_effect = [tenant, None]
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
         response = client.post(
@@ -194,3 +213,51 @@ def test_document_upload_extracts_redacts_and_audits_pdf_content() -> None:
         "content_type": "application/pdf",
         "ingestion_action": "created",
     }
+
+
+def test_document_upload_returns_safe_503_when_configured_storage_is_unavailable() -> None:
+    session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    session.scalar.side_effect = [tenant, None]
+
+    app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: (
+        UnavailableRedactedDocumentStore()
+    )
+
+    try:
+        response = client.post(
+            "/api/v1/documents",
+            files={
+                "uploaded_file": (
+                    "redis-investigation.md",
+                    b"# Redis Investigation\n\nInspect eviction policy.",
+                    "text/markdown",
+                )
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_event = session.add.call_args.args[0]
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Document storage is temporarily unavailable. Try again later."
+    }
+    assert audit_event.tenant_id is None
+    assert audit_event.event_type == "document.upload"
+    assert audit_event.outcome == "failed"
+    assert audit_event.request_id == response.headers["x-request-id"]
+    assert audit_event.event_metadata == {
+        "upload_status": "storage_unavailable",
+        "source_path": None,
+        "content_type": None,
+        "ingestion_action": None,
+    }
+    session.rollback.assert_called_once()
+    session.commit.assert_called_once()

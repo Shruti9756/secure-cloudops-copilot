@@ -28,7 +28,12 @@ from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
+from app.infrastructure.s3 import S3DocumentStorageUnavailableError
 from app.services.audit import AuditOutcome, record_audit_event
+from app.services.document_storage import (
+    RedactedDocumentStore,
+    get_redacted_document_store,
+)
 from app.services.ingestion import get_or_create_tenant, ingest_document
 from app.services.metrics import (
     metrics_content_type,
@@ -479,6 +484,10 @@ async def upload_document(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
+    document_store: Annotated[
+        RedactedDocumentStore | None,
+        Depends(get_redacted_document_store),
+    ],
 ) -> DocumentUploadResponse:
     """Validate and ingest one supported document for the server-controlled tenant."""
     # Read one additional byte, allowing validation to reject oversized files safely.
@@ -511,19 +520,41 @@ async def upload_document(
             detail=str(error),
         ) from error
 
-    tenant = get_or_create_tenant(
-        session,
-        slug=DEMO_TENANT_SLUG,
-        name="NimbusCart",
-    )
-    ingestion_result = ingest_document(
-        session=session,
-        tenant=tenant,
-        source_path=validated_upload.source_path,
-        content=validated_upload.content,
-        ingestion_source="api-upload",
-        content_type=validated_upload.content_type,
-    )
+    try:
+        tenant = get_or_create_tenant(
+            session,
+            slug=DEMO_TENANT_SLUG,
+            name="NimbusCart",
+        )
+        ingestion_result = ingest_document(
+            session=session,
+            tenant=tenant,
+            source_path=validated_upload.source_path,
+            content=validated_upload.content,
+            ingestion_source="api-upload",
+            content_type=validated_upload.content_type,
+            document_store=document_store,
+        )
+    except S3DocumentStorageUnavailableError as error:
+        # A failed mirror must not leave a pending database document behind.
+        session.rollback()
+        record_document_upload_audit_event(
+            session,
+            tenant=None,
+            request_id=http_request.state.request_id,
+            outcome="failed",
+            upload_status="storage_unavailable",
+            source_path=None,
+            content_type=None,
+            ingestion_action=None,
+        )
+        session.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document storage is temporarily unavailable. Try again later.",
+        ) from error
+
     record_document_upload_audit_event(
         session,
         tenant=tenant,
