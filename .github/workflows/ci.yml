@@ -89,4 +89,32 @@ jobs:
         uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_ENABLE_COMMENTS: false 
+
+  terraform-quality:
+    name: Terraform format and validation
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      # Download the locked provider only. This job never connects to AWS state.
+      - name: Initialize Terraform without a backend
+        run: terraform init -backend=false -input=false
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check
+
+      - name: Validate Terraform configuration
+        run: terraform validate -no-color
