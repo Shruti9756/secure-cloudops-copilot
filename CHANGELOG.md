@@ -8,7 +8,6 @@ This project follows semantic versioning. The V0.x releases are learning and por
 
 ### Remaining release requirements
 
-- Run a fresh-clone setup verification using the README.
 - Open and merge the V0.1 pull request to `main`.
 - Create the `v0.1.0` Git tag and GitHub Release.
 

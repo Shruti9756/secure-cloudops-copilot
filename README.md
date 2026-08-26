@@ -186,7 +186,7 @@ The project is actively progressing through the versioned roadmap in [VERSIONED_
 - Current focus: final V0.1 release verification.
 - Local RAG, document ingestion, caching, rate limiting, MCP, security checks, auditing, metrics, dashboards, CI, Terraform-managed S3 storage, and screenshot evidence are implemented.
 - Amazon Bedrock was explored; local Ollama is the verified and documented V0.1 provider while Bedrock authorization remains unresolved.
-- Remaining V0.1 gates: fresh-clone verification, pull-request merge to `main`, annotated `v0.1.0` tag, and GitHub Release publication.
+- Remaining V0.1 gates: pull-request merge to `main`, annotated `v0.1.0` tag, and GitHub Release publication.
 - Cloud deployment, authentication/RBAC, production observability, and advanced retrieval remain later roadmap work.
 
 ## Technology stack
