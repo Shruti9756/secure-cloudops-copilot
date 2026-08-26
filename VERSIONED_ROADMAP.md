@@ -66,6 +66,15 @@
 
 **Purpose:** Deliver a small but complete locally runnable AI product by **2 September 2026**. This is the deadline release.
 
+## Early cloud-storage checkpoint — completed 25 August 2026
+
+- [x] Created a private Amazon S3 bucket with Block Public Access, versioning, default encryption, and synthetic-data tags.
+- [x] Added a fail-closed S3 storage adapter for extracted and redacted document text.
+- [x] Stored only safe S3 references in PostgreSQL: provider, bucket, key, version ID, and ETag.
+- [x] Verified a real host API upload reaches S3 with explicit AES-256 encryption and redacted content.
+- [x] Verified the Docker worker subsequently chunks and embeds the uploaded document.
+- [x] Kept Docker Compose free of host AWS credentials; future ECS tasks will use IAM roles.
+
 ## User experience
 
 1. A user opens the web app.
@@ -107,7 +116,7 @@
 
 - [ ] Accept Markdown, TXT, PDF, and DOCX files.
 - [ ] Use PyMuPDF for PDFs and `python-docx` for DOCX extraction.
-- [ ] Store original files locally first; optionally mirror to Amazon S3 for the cloud demo.
+- [x] Optionally mirror redacted extracted text to a private, encrypted, versioned Amazon S3 bucket for cloud demo evidence.
 - [ ] Normalize extracted text while retaining heading/page information.
 - [ ] Implement chunking with documented chunk size and overlap.
 - [ ] Generate embeddings with Amazon Bedrock when AWS is available; use an optional local development provider when not.
@@ -126,10 +135,10 @@
 
 ### Minimal AWS exposure
 
-- [ ] Install and configure AWS CLI with an IAM identity, never root credentials.
+- [x] Install and configure AWS CLI with an IAM identity, never root credentials.
 - [ ] Enable model access in Amazon Bedrock for a low-cost test model/embedding model suitable for the selected region.
-- [ ] Use `boto3` for Bedrock and S3 integrations.
-- [ ] Create one encrypted S3 demo bucket for synthetic documents only.
+- [x] Use `boto3` for Bedrock and S3 integrations.
+- [x] Create one encrypted S3 demo bucket for synthetic documents only.
 - [ ] Set AWS Budget alerts before invoking paid services.
 
 ### Testing and GitHub

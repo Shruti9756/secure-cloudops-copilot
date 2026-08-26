@@ -5,7 +5,7 @@ import { type ChangeEvent, type FormEvent, useState } from "react";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-const MAX_TEXT_UPLOAD_BYTES = 1_000_000;
+const MAX_DOCUMENT_UPLOAD_BYTES = 1_000_000;
 
 type DocumentIngestionStatus = "pending" | "chunked" | "embedded";
 
@@ -56,10 +56,15 @@ function getStatusClasses(status: DocumentIngestionStatus): string {
   return "border-amber-400/30 bg-amber-400/10 text-amber-200";
 }
 
-function isSupportedTextFile(file: File): boolean {
+function isSupportedDocumentFile(file: File): boolean {
   const normalizedName = file.name.toLowerCase();
 
-  return normalizedName.endsWith(".md") || normalizedName.endsWith(".txt");
+  return (
+    normalizedName.endsWith(".md") ||
+    normalizedName.endsWith(".txt") ||
+    normalizedName.endsWith(".pdf") ||
+    normalizedName.endsWith(".docx")
+  );
 }
 
 export function DocumentManagement() {
@@ -111,12 +116,12 @@ export function DocumentManagement() {
     }
 
     // Browser checks improve feedback; the API remains the security authority.
-    if (!isSupportedTextFile(file)) {
+    if (!isSupportedDocumentFile(file)) {
       setUploadError("Choose a Markdown (.md) or plain-text (.txt) file.");
       return;
     }
 
-    if (file.size > MAX_TEXT_UPLOAD_BYTES) {
+    if (file.size > MAX_DOCUMENT_UPLOAD_BYTES) {
       setUploadError("Choose a file smaller than 1 MB.");
     }
   }
@@ -125,16 +130,16 @@ export function DocumentManagement() {
     event.preventDefault();
 
     if (selectedFile === null) {
-      setUploadError("Choose a Markdown or text file before uploading.");
+      setUploadError("Choose a supported document before uploading.");
       return;
     }
 
-    if (!isSupportedTextFile(selectedFile)) {
-      setUploadError("Choose a Markdown (.md) or plain-text (.txt) file.");
+    if (!isSupportedDocumentFile(selectedFile)) {
+      setUploadError("Choose a supported document file (.md, .txt, .pdf, .docx).");
       return;
     }
 
-    if (selectedFile.size > MAX_TEXT_UPLOAD_BYTES) {
+    if (selectedFile.size > MAX_DOCUMENT_UPLOAD_BYTES) {
       setUploadError("Choose a file smaller than 1 MB.");
       return;
     }
@@ -187,8 +192,8 @@ export function DocumentManagement() {
         <div>
           <h2 className="text-lg font-bold">Knowledge documents</h2>
           <p className="mt-1 text-sm leading-6 text-slate-400">
-            Upload Markdown or text documents. The API validates and redacts
-            them before storage.
+            Upload Markdown, text, digital PDF, or DOCX documents. The API extracts
+text, validates it, and redacts secrets before storage.
           </p>
         </div>
 
@@ -207,11 +212,11 @@ export function DocumentManagement() {
           className="block text-sm font-medium text-slate-300"
           htmlFor="knowledge-file"
         >
-          Markdown or text document
+          Knowledge document
         </label>
 
         <input
-          accept=".md,.txt,text/markdown,text/plain"
+          accept=".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           className="block w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300 file:mr-4 file:rounded-md file:border-0 file:bg-cyan-400 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-950 hover:file:bg-cyan-300"
           disabled={isUploading}
           id="knowledge-file"
@@ -221,7 +226,7 @@ export function DocumentManagement() {
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-slate-500">
-            Accepted: .md and .txt · Maximum size: 1 MB
+            Accepted: .md, .txt, .pdf, and .docx · Maximum size: 1 MB
           </p>
 
           <button

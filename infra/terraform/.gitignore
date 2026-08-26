@@ -1,0 +1,20 @@
+# Terraform provider downloads and working data.
+.terraform/
+
+# Local state can contain resource IDs and other environment details.
+*.tfstate
+*.tfstate.*
+
+# Crash logs.
+crash.log
+crash.*.log
+
+# Per-developer values. Commit only example files.
+*.tfvars
+!*.tfvars.example
+
+# Generated override files should not be committed.
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import KnowledgeDocument, Tenant
+from app.infrastructure.s3 import S3DocumentReference
+from app.services.document_storage import RedactedDocumentStore
 from app.services.redaction import RedactionResult, redact_secrets
 
 IngestionAction = Literal["created", "updated", "unchanged"]
@@ -37,9 +39,10 @@ def _document_metadata_for(
     *,
     ingestion_source: str,
     content_type: str,
+    storage_reference: S3DocumentReference | None,
 ) -> dict[str, object]:
-    """Build safe ingestion metadata without preserving any original secret values."""
-    return {
+    """Build safe metadata without preserving raw secrets or raw source files."""
+    metadata: dict[str, object] = {
         "content_type": content_type,
         "ingestion_source": ingestion_source,
         "redaction": {
@@ -48,6 +51,18 @@ def _document_metadata_for(
             "types": list(redaction_result.redaction_types),
         },
     }
+
+    if storage_reference is not None:
+        # This identifies a redacted text copy, never the original binary upload.
+        metadata["redacted_text_storage"] = {
+            "provider": "s3",
+            "bucket_name": storage_reference.bucket_name,
+            "object_key": storage_reference.object_key,
+            "version_id": storage_reference.version_id,
+            "e_tag": storage_reference.e_tag,
+        }
+
+    return metadata
 
 
 def get_or_create_tenant(session: Session, slug: str, name: str) -> Tenant:
@@ -68,7 +83,9 @@ def ingest_document(
     content: str,
     ingestion_source: str = "local-demo-data",
     content_type: str = "text/markdown",
+    document_store: RedactedDocumentStore | None = None,
 ) -> IngestionResult:
+    """Redact, optionally mirror, and persist one tenant-scoped knowledge document."""
     # Redact before hashing, storing, chunking, embedding, or retrieving document content.
     redaction_result = redact_secrets(content)
     safe_content = redaction_result.content
@@ -79,6 +96,28 @@ def ingest_document(
         KnowledgeDocument.source_path == source_path,
     )
     document = session.scalar(statement)
+
+    # Identical source content needs neither new database writes nor a new S3 version.
+    if document is not None and document.source_sha256 == content_hash:
+        return IngestionResult(action="unchanged", source_path=source_path)
+
+    storage_reference: S3DocumentReference | None = None
+
+    if document_store is not None:
+        # A configured mirror must succeed before database state is changed.
+        storage_reference = document_store.store_redacted_document(
+            tenant_slug=tenant.slug,
+            source_path=source_path,
+            redacted_content=safe_content,
+            content_sha256=content_hash,
+        )
+
+    document_metadata = _document_metadata_for(
+        redaction_result,
+        ingestion_source=ingestion_source,
+        content_type=content_type,
+        storage_reference=storage_reference,
+    )
 
     if document is None:
         fallback_title = Path(source_path).stem.replace("-", " ").replace("_", " ").title()
@@ -91,18 +130,11 @@ def ingest_document(
                 source_sha256=content_hash,
                 content=safe_content,
                 ingestion_status="pending",
-                document_metadata=_document_metadata_for(
-                    redaction_result,
-                    ingestion_source=ingestion_source,
-                    content_type=content_type,
-                ),
+                document_metadata=document_metadata,
             )
         )
 
         return IngestionResult(action="created", source_path=source_path)
-
-    if document.source_sha256 == content_hash:
-        return IngestionResult(action="unchanged", source_path=source_path)
 
     fallback_title = Path(source_path).stem.replace("-", " ").replace("_", " ").title()
     document.title = extract_markdown_title(safe_content, fallback_title)
@@ -111,13 +143,7 @@ def ingest_document(
     # Existing chunks describe older content and must not be retrieved after an update.
     document.chunks.clear()
     document.ingestion_status = "pending"
-    document.document_metadata = (
-        _document_metadata_for(
-            redaction_result,
-            ingestion_source=ingestion_source,
-            content_type=content_type,
-        ),
-    )
+    document.document_metadata = document_metadata
 
     return IngestionResult(action="updated", source_path=source_path)
 

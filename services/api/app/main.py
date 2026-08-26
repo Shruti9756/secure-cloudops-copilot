@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable, Iterator
+from time import perf_counter
 from typing import Annotated, Literal
 from urllib.error import URLError
 from uuid import uuid4
@@ -27,8 +28,19 @@ from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
+from app.infrastructure.s3 import S3DocumentStorageUnavailableError
 from app.services.audit import AuditOutcome, record_audit_event
+from app.services.document_storage import (
+    RedactedDocumentStore,
+    get_redacted_document_store,
+)
 from app.services.ingestion import get_or_create_tenant, ingest_document
+from app.services.metrics import (
+    metrics_content_type,
+    observe_http_request,
+    observe_rag_request,
+    render_metrics,
+)
 from app.services.rag import GroundedAnswer, answer_grounded_question
 from app.services.rate_limit import (
     build_rate_limit_key,
@@ -41,8 +53,8 @@ from app.services.response_cache import (
 )
 from app.services.retrieval import DEFAULT_RETRIEVAL_LIMIT, MAX_RETRIEVAL_LIMIT
 from app.services.upload_validation import (
-    MAX_TEXT_UPLOAD_BYTES,
-    validate_and_decode_text_upload,
+    MAX_DOCUMENT_UPLOAD_BYTES,
+    validate_and_extract_upload,
 )
 
 APP_VERSION = "0.1.0"
@@ -190,17 +202,43 @@ app.add_middleware(
 )
 
 
+def _route_template_for_request(request: Request) -> str:
+    """Return a bounded route template instead of a user-controlled URL path."""
+    route = request.scope.get("route")
+    route_template = getattr(route, "path", None)
+
+    return route_template if isinstance(route_template, str) else "unmatched"
+
+
 @app.middleware("http")
 async def add_server_generated_request_id(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """Attach one server-generated ID to every request and its response."""
+    """Attach one request ID and record privacy-safe HTTP metrics."""
     # Never trust a client-supplied correlation ID in this local security baseline.
     request_id = uuid4().hex
     request.state.request_id = request_id
+    started_at = perf_counter()
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        # Record unexpected failures without logging request content or identifiers.
+        observe_http_request(
+            method=request.method,
+            route=_route_template_for_request(request),
+            status_code=500,
+            duration_seconds=perf_counter() - started_at,
+        )
+        raise
+
+    observe_http_request(
+        method=request.method,
+        route=_route_template_for_request(request),
+        status_code=response.status_code,
+        duration_seconds=perf_counter() - started_at,
+    )
     response.headers["X-Request-ID"] = request_id
 
     return response
@@ -404,6 +442,15 @@ def health_check() -> ServiceStatus:
     return get_status()
 
 
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """Expose Prometheus metrics with finite, non-sensitive labels only."""
+    return Response(
+        content=render_metrics(),
+        headers={"Content-Type": metrics_content_type()},
+    )
+
+
 @app.get("/ready", response_model=ReadinessStatus, tags=["system"])
 def readiness_check(response: Response) -> ReadinessStatus:
     readiness = get_readiness_status()
@@ -424,28 +471,33 @@ def api_status() -> ServiceStatus:
     response_model=DocumentUploadResponse,
     tags=["documents"],
 )
-async def upload_text_document(
+async def upload_document(
     http_request: Request,
     uploaded_file: Annotated[
         UploadFile,
         File(
             description=(
-                "A UTF-8 Markdown (.md) or plain-text (.txt) knowledge document. "
-                "Maximum size: 1 MB."
+                "A Markdown (.md), plain-text (.txt), digital PDF (.pdf), or "
+                "Word DOCX (.docx) knowledge document. PDFs must contain "
+                "selectable text. Maximum raw file size: 1 MB."
             )
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
+    document_store: Annotated[
+        RedactedDocumentStore | None,
+        Depends(get_redacted_document_store),
+    ],
 ) -> DocumentUploadResponse:
-    """Validate and ingest one local text document into the server-controlled tenant."""
+    """Validate and ingest one supported document for the server-controlled tenant."""
     # Read one additional byte, allowing validation to reject oversized files safely.
     try:
-        content_bytes = await uploaded_file.read(MAX_TEXT_UPLOAD_BYTES + 1)
+        content_bytes = await uploaded_file.read(MAX_DOCUMENT_UPLOAD_BYTES + 1)
     finally:
         await uploaded_file.close()
 
     try:
-        validated_upload = validate_and_decode_text_upload(
+        validated_upload = validate_and_extract_upload(
             filename=uploaded_file.filename,
             content_bytes=content_bytes,
         )
@@ -468,19 +520,41 @@ async def upload_text_document(
             detail=str(error),
         ) from error
 
-    tenant = get_or_create_tenant(
-        session,
-        slug=DEMO_TENANT_SLUG,
-        name="NimbusCart",
-    )
-    ingestion_result = ingest_document(
-        session=session,
-        tenant=tenant,
-        source_path=validated_upload.source_path,
-        content=validated_upload.content,
-        ingestion_source="api-upload",
-        content_type=validated_upload.content_type,
-    )
+    try:
+        tenant = get_or_create_tenant(
+            session,
+            slug=DEMO_TENANT_SLUG,
+            name="NimbusCart",
+        )
+        ingestion_result = ingest_document(
+            session=session,
+            tenant=tenant,
+            source_path=validated_upload.source_path,
+            content=validated_upload.content,
+            ingestion_source="api-upload",
+            content_type=validated_upload.content_type,
+            document_store=document_store,
+        )
+    except S3DocumentStorageUnavailableError as error:
+        # A failed mirror must not leave a pending database document behind.
+        session.rollback()
+        record_document_upload_audit_event(
+            session,
+            tenant=None,
+            request_id=http_request.state.request_id,
+            outcome="failed",
+            upload_status="storage_unavailable",
+            source_path=None,
+            content_type=None,
+            ingestion_action=None,
+        )
+        session.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document storage is temporarily unavailable. Try again later.",
+        ) from error
+
     record_document_upload_audit_event(
         session,
         tenant=tenant,
@@ -653,6 +727,10 @@ def ask_question(
 ) -> AskResponse:
     """Answer one tenant-scoped question through guarded and rate-limited RAG."""
     if not request.question.strip():
+        observe_rag_request(
+            status="invalid_question",
+            cache_status="NOT_CHECKED",
+        )
         record_ask_audit_event(
             session,
             request_id=http_request.state.request_id,
@@ -681,6 +759,10 @@ def ask_question(
 
     # Unlike caching, a missing rate limiter is a security failure, so fail closed.
     if not rate_limit.is_enforced:
+        observe_rag_request(
+            status="rate_limit_unavailable",
+            cache_status="NOT_CHECKED",
+        )
         record_ask_audit_event(
             session,
             request_id=http_request.state.request_id,
@@ -697,6 +779,10 @@ def ask_question(
         )
 
     if not rate_limit.is_allowed:
+        observe_rag_request(
+            status="rate_limited",
+            cache_status="NOT_CHECKED",
+        )
         record_ask_audit_event(
             session,
             request_id=http_request.state.request_id,
@@ -744,6 +830,10 @@ def ask_question(
                 and cached_response.safety_validation_passed is True
             ):
                 response.headers["X-Cache"] = "HIT"
+                observe_rag_request(
+                    status=cached_response.status,
+                    cache_status="HIT",
+                )
                 record_ask_audit_event(
                     session,
                     event_type="rag.answer_completed",
@@ -757,7 +847,8 @@ def ask_question(
                 return cached_response
 
     # Redis problems never block incident investigation; they only disable caching.
-    response.headers["X-Cache"] = "MISS" if cache_lookup.is_available else "BYPASS"
+    cache_status = "MISS" if cache_lookup.is_available else "BYPASS"
+    response.headers["X-Cache"] = cache_status
 
     try:
         answer = answer_grounded_question(
@@ -770,6 +861,10 @@ def ask_question(
         )
     except (TimeoutError, URLError) as error:
         # Do not expose local network details to an API client.
+        observe_rag_request(
+            status="model_provider_unavailable",
+            cache_status=cache_status,
+        )
         record_ask_audit_event(
             session,
             event_type="rag.answer_request",
@@ -786,6 +881,11 @@ def ask_question(
 
     ask_response = build_ask_response(answer)
 
+    observe_rag_request(
+        status=ask_response.status,
+        cache_status=cache_status,
+    )
+
     # Cache only successful evidence-backed answers, never uncertainty or validation failure.
     if ask_response.status == "grounded" and cache_lookup.is_available:
         store_cached_response(
@@ -799,6 +899,7 @@ def ask_question(
         if ask_response.status in {"citation_validation_failed", "safety_validation_failed"}
         else "succeeded"
     )
+
     record_ask_audit_event(
         session,
         event_type="rag.answer_completed",

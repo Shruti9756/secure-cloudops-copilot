@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     # Local development uses an AWS CLI profile; AWS deployments will use an IAM role.
     aws_profile: str | None = None
     aws_region: str = "us-east-1"
+    # Disabled keeps Docker and local tests independent from AWS credentials.
+    document_storage_backend: Literal["disabled", "s3"] = "disabled"
+    document_storage_s3_bucket: str | None = None
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

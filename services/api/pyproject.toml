@@ -8,8 +8,11 @@ dependencies = [
     "botocore[crt]>=1.43.69",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.141.1",
     "pgvector>=0.5.0",
+    "prometheus-client>=0.26.0",
     "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.14.2",
+    "pymupdf>=1.28.2",
+    "python-docx>=1.2.0",
     "redis>=8.1.0",
     "sqlalchemy>=2.0.51",
 ]
@@ -26,7 +29,13 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra"
+
+# Live E2E tests require Docker, PostgreSQL, Redis, Ollama, and the worker.
+# Keep normal local tests and GitHub Actions independent from those services.
+addopts = "-ra -m \"not e2e\""
+markers = [
+    "e2e: live test requiring Docker Compose services and local Ollama models",
+]
 
 
 [tool.ruff]

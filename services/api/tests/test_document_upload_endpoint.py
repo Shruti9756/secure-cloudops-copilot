@@ -1,12 +1,43 @@
 from unittest.mock import Mock
 from uuid import uuid4
 
+import pymupdf
 from fastapi.testclient import TestClient
 
 from app.db.models import AuditEvent, KnowledgeDocument, Tenant
+from app.infrastructure.s3 import S3DocumentStorageUnavailableError
 from app.main import app, get_database_session
+from app.services.document_storage import get_redacted_document_store
 
 client = TestClient(app)
+
+
+class UnavailableRedactedDocumentStore:
+    """Fake configured storage that proves the endpoint fails safely."""
+
+    def store_redacted_document(
+        self,
+        *,
+        tenant_slug: str,
+        source_path: str,
+        redacted_content: str,
+        content_sha256: str,
+    ) -> None:
+        raise S3DocumentStorageUnavailableError("S3 document storage is unavailable")
+
+
+def make_pdf_upload_bytes() -> bytes:
+    """Build a digital PDF that travels through the real upload endpoint."""
+    pdf_document = pymupdf.open()
+
+    try:
+        page = pdf_document.new_page()
+        page.insert_text((72, 72), "Redis PDF Investigation")
+        page.insert_text((72, 92), "Authorization: Bearer example-token-123")
+        page.insert_text((72, 112), "Inspect Redis eviction policy and memory usage.")
+        return pdf_document.tobytes()
+    finally:
+        pdf_document.close()
 
 
 def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> None:
@@ -19,6 +50,7 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
     # First query finds the tenant; second query confirms this source path is new.
     session.scalar.side_effect = [tenant, None]
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
         response = client.post(
@@ -87,13 +119,14 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
 def test_document_upload_rejects_and_audits_unsupported_files() -> None:
     session = Mock()
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
         response = client.post(
             "/api/v1/documents",
             files={
                 "uploaded_file": (
-                    "deployment-record.pdf",
+                    "deployment-record.exe",
                     b"not a supported file type",
                     "application/pdf",
                 )
@@ -105,7 +138,7 @@ def test_document_upload_rejects_and_audits_unsupported_files() -> None:
     audit_event = session.add.call_args.args[0]
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Only .md and .txt uploads are supported"
+    assert response.json()["detail"] == "Only .md, .txt, .pdf, and .docx uploads are supported"
     assert audit_event.tenant_id is None
     assert audit_event.event_type == "document.upload"
     assert audit_event.outcome == "denied"
@@ -117,4 +150,114 @@ def test_document_upload_rejects_and_audits_unsupported_files() -> None:
         "ingestion_action": None,
     }
     session.scalar.assert_not_called()
+    session.commit.assert_called_once()
+
+
+def test_document_upload_extracts_redacts_and_audits_pdf_content() -> None:
+    """PDF uploads use the same redaction, ingestion, and audit boundaries as text."""
+    session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    session.scalar.side_effect = [tenant, None]
+    app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
+
+    try:
+        response = client.post(
+            "/api/v1/documents",
+            files={
+                "uploaded_file": (
+                    "Redis Investigation.pdf",
+                    make_pdf_upload_bytes(),
+                    "application/pdf",
+                )
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    stored_objects = [call.args[0] for call in session.add.call_args_list]
+    stored_document = next(
+        stored_object
+        for stored_object in stored_objects
+        if isinstance(stored_object, KnowledgeDocument)
+    )
+    audit_event = next(
+        stored_object for stored_object in stored_objects if isinstance(stored_object, AuditEvent)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source_path"] == "uploads/redis-investigation.pdf"
+
+    # The PDF page marker is retained, but the bearer token never reaches storage.
+    assert "[PDF page 1]" in stored_document.content
+    assert "Redis PDF Investigation" in stored_document.content
+    assert "Authorization: Bearer [REDACTED: BEARER_TOKEN]" in stored_document.content
+    assert "example-token-123" not in stored_document.content
+
+    assert stored_document.document_metadata["content_type"] == "application/pdf"
+    assert stored_document.document_metadata["redaction"] == {
+        "applied": True,
+        "count": 1,
+        "types": ["BEARER_TOKEN"],
+    }
+
+    assert audit_event.event_type == "document.upload"
+    assert audit_event.outcome == "succeeded"
+    assert audit_event.event_metadata == {
+        "upload_status": "accepted",
+        "source_path": "uploads/redis-investigation.pdf",
+        "content_type": "application/pdf",
+        "ingestion_action": "created",
+    }
+
+
+def test_document_upload_returns_safe_503_when_configured_storage_is_unavailable() -> None:
+    session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    session.scalar.side_effect = [tenant, None]
+
+    app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_redacted_document_store] = lambda: (
+        UnavailableRedactedDocumentStore()
+    )
+
+    try:
+        response = client.post(
+            "/api/v1/documents",
+            files={
+                "uploaded_file": (
+                    "redis-investigation.md",
+                    b"# Redis Investigation\n\nInspect eviction policy.",
+                    "text/markdown",
+                )
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_event = session.add.call_args.args[0]
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Document storage is temporarily unavailable. Try again later."
+    }
+    assert audit_event.tenant_id is None
+    assert audit_event.event_type == "document.upload"
+    assert audit_event.outcome == "failed"
+    assert audit_event.request_id == response.headers["x-request-id"]
+    assert audit_event.event_metadata == {
+        "upload_status": "storage_unavailable",
+        "source_path": None,
+        "content_type": None,
+        "ingestion_action": None,
+    }
+    session.rollback.assert_called_once()
     session.commit.assert_called_once()

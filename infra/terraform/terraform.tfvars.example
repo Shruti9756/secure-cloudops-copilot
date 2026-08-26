@@ -1,0 +1,9 @@
+# Copy this file to terraform.tfvars locally, then replace these placeholders.
+# terraform.tfvars is ignored by Git.
+
+aws_profile = "your-aws-cli-profile"
+aws_region  = "us-east-1"
+aws_account_id = "123456789012"
+environment = "development"
+
+document_storage_bucket_name = "your-private-s3-bucket-name"

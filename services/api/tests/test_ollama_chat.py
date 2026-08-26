@@ -76,7 +76,7 @@ def test_chat_posts_valid_messages_and_returns_completion() -> None:
                 "keep_alive": "5m",
                 "options": {
                     "temperature": 0.2,
-                    "num_predict": 250,
+                    "num_predict": 64,
                 },
             },
         )

@@ -14,6 +14,7 @@ from app.main import (
     get_redis_cache,
 )
 from app.services.citations import CitationValidationResult
+from app.services.metrics import METRICS_REGISTRY
 from app.services.rag import GroundedAnswer
 from app.services.response_cache import build_ask_response_cache_key
 from app.services.retrieval import RetrievedChunk
@@ -172,6 +173,38 @@ def test_ask_endpoint_returns_a_grounded_server_scoped_response(
     # The browser did not choose the tenant; the server enforced the demo tenant.
     assert captured_arguments["tenant_slug"] == "nimbuscart"
     assert captured_arguments["limit"] == 2
+
+
+def test_ask_endpoint_records_a_bounded_grounded_rag_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful request increments a metric without exposing its question."""
+    labels = {
+        "status": "grounded",
+        "cache_status": "MISS",
+    }
+    metric_name = "secure_cloudops_rag_requests_total"
+    before = METRICS_REGISTRY.get_sample_value(metric_name, labels=labels) or 0
+
+    install_fake_dependencies()
+    monkeypatch.setattr(
+        "app.main.answer_grounded_question",
+        lambda **_: make_grounded_answer(),
+    )
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    after = METRICS_REGISTRY.get_sample_value(metric_name, labels=labels) or 0
+
+    assert response.status_code == 200
+    assert response.headers["x-cache"] == "MISS"
+    assert after == before + 1
 
 
 def test_ask_endpoint_rejects_whitespace_question_before_rag(
