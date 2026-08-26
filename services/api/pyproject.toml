@@ -29,7 +29,13 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra"
+
+# Live E2E tests require Docker, PostgreSQL, Redis, Ollama, and the worker.
+# Keep normal local tests and GitHub Actions independent from those services.
+addopts = "-ra -m \"not e2e\""
+markers = [
+    "e2e: live test requiring Docker Compose services and local Ollama models",
+]
 
 
 [tool.ruff]
