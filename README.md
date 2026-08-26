@@ -183,9 +183,10 @@ Amazon S3 is now a real, verified V0.1 integration. The remaining AWS work is in
 
 The project is actively progressing through the versioned roadmap in [VERSIONED_ROADMAP.md](VERSIONED_ROADMAP.md).
 
-- Current focus: completing the V0.1 local portfolio release.
-- Local RAG, document ingestion, caching, rate limiting, MCP, security checks, auditing, metrics, dashboards, CI, and the S3 redacted-text storage checkpoint are implemented.
-- Still required for V0.1: a fresh-clone setup verification, Bedrock authorization or a clearly documented fallback decision, budget-alert evidence, polished screenshots/demo video, and the `v0.1.0` release.
+- Current focus: final V0.1 release verification.
+- Local RAG, document ingestion, caching, rate limiting, MCP, security checks, auditing, metrics, dashboards, CI, Terraform-managed S3 storage, and screenshot evidence are implemented.
+- Amazon Bedrock was explored; local Ollama is the verified and documented V0.1 provider while Bedrock authorization remains unresolved.
+- Remaining V0.1 gates: fresh-clone verification, pull-request merge to `main`, annotated `v0.1.0` tag, and GitHub Release publication.
 - Cloud deployment, authentication/RBAC, production observability, and advanced retrieval remain later roadmap work.
 
 ## Technology stack
