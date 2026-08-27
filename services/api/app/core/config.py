@@ -21,6 +21,11 @@ ENV_FILE = find_env_file()
 
 class Settings(BaseSettings):
     app_env: str = "development"
+    # Temporary local identity used only while APP_ENV is development.
+    # Cognito JWT validation will replace this adapter in a later V0.2 step.
+    local_development_identity_subject: str = "local-demo-admin"
+    local_development_identity_display_name: str = "Local Demo Administrator"
+    local_development_identity_role: Literal["admin", "manager", "engineer"] = "admin"
     database_url: str
     redis_url: str
     # Limit costly AI requests without hard-coding environment-specific policy.
