@@ -22,10 +22,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
-class Tenant(Base):
-    __tablename__ = "tenants"
+class Organization(Base):
+    """A company boundary that owns one or more tenant workspaces."""
 
-    # A tenant is the top-level data-isolation boundary for a customer/workspace.
+    __tablename__ = "organizations"
+
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -35,6 +36,106 @@ class Tenant(Base):
         nullable=False,
     )
 
+    # A future organization may have several isolated workspaces.
+    tenants: Mapped[list[Tenant]] = relationship(back_populates="organization")
+
+    # Memberships decide which users may access this organization.
+    memberships: Mapped[list[Membership]] = relationship(
+        back_populates="organization",
+        cascade="all, delete-orphan",
+    )
+
+
+class User(Base):
+    """A future authenticated person identified by an external identity provider."""
+
+    __tablename__ = "users"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+
+    # Cognito's stable `sub` value will be stored here later; do not use email as identity.
+    identity_subject: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+    )
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    memberships: Mapped[list[Membership]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class Membership(Base):
+    """A user's role within exactly one organization."""
+
+    __tablename__ = "memberships"
+    __table_args__ = (
+        # A user may have only one role record in an organization.
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            name="uq_memberships_organization_user",
+        ),
+        # Database-level validation prevents invalid roles even outside the API.
+        CheckConstraint(
+            "role IN ('admin', 'manager', 'engineer')",
+            name="ck_memberships_role",
+        ),
+        # Future login checks commonly begin by finding a user's memberships.
+        Index("ix_memberships_user_id", "user_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="memberships")
+    user: Mapped[User] = relationship(back_populates="memberships")
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    # A tenant is an isolated workspace inside one organization.
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # Authorization will prove a user belongs to this organization before using this tenant.
+    organization: Mapped[Organization] = relationship(back_populates="tenants")
     documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="tenant",
         cascade="all, delete-orphan",

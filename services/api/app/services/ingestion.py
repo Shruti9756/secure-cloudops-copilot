@@ -6,7 +6,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import KnowledgeDocument, Tenant
+from app.db.models import KnowledgeDocument, Organization, Tenant
 from app.infrastructure.s3 import S3DocumentReference
 from app.services.document_storage import RedactedDocumentStore
 from app.services.redaction import RedactionResult, redact_secrets
@@ -65,11 +65,26 @@ def _document_metadata_for(
     return metadata
 
 
+def get_or_create_organization(session: Session, slug: str, name: str) -> Organization:
+    """Create the local demo organization once, or return its existing record."""
+    organization = session.scalar(select(Organization).where(Organization.slug == slug))
+
+    if organization is None:
+        organization = Organization(slug=slug, name=name)
+        session.add(organization)
+        session.flush()
+
+    return organization
+
+
 def get_or_create_tenant(session: Session, slug: str, name: str) -> Tenant:
+    """Create a tenant workspace that is always owned by an organization."""
     tenant = session.scalar(select(Tenant).where(Tenant.slug == slug))
 
     if tenant is None:
-        tenant = Tenant(slug=slug, name=name)
+        # V0.2 keeps the V0.1 demo simple: NimbusCart owns its nimbuscart workspace.
+        organization = get_or_create_organization(session, slug, name)
+        tenant = Tenant(slug=slug, name=name, organization=organization)
         session.add(tenant)
         session.flush()
 
