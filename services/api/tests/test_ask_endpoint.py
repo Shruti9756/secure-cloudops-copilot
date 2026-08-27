@@ -8,6 +8,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from app.db.models import Tenant
 from app.main import (
     app,
+    get_authorized_knowledge_tenant,
     get_chat_provider,
     get_database_session,
     get_embedding_provider,
@@ -75,6 +76,13 @@ def install_fake_dependencies(
         )
 
     app.dependency_overrides[get_database_session] = lambda: database_session
+    # Endpoint tests focus on RAG behavior; authorization has separate tests.
+    app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
     app.dependency_overrides[get_redis_cache] = lambda: cache
     app.dependency_overrides[get_embedding_provider] = lambda: object()
     app.dependency_overrides[get_chat_provider] = lambda: object()

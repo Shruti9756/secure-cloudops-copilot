@@ -30,11 +30,20 @@ from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.infrastructure.s3 import S3DocumentStorageUnavailableError
 from app.services.audit import AuditOutcome, record_audit_event
+from app.services.authorization import (
+    AuthenticatedPrincipal,
+    AuthorizationDeniedError,
+    authorize_tenant_action,
+)
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
 )
 from app.services.ingestion import get_or_create_tenant, ingest_document
+from app.services.local_identity import (
+    LocalDevelopmentIdentityUnavailableError,
+    get_local_development_principal,
+)
 from app.services.metrics import (
     metrics_content_type,
     observe_http_request,
@@ -277,6 +286,46 @@ def get_database_session() -> Iterator[Session]:
         yield session
 
 
+def get_current_principal(
+    session: Annotated[Session, Depends(get_database_session)],
+) -> AuthenticatedPrincipal:
+    """Resolve the temporary local principal until Cognito JWT validation is added."""
+    settings = get_settings()
+
+    try:
+        return get_local_development_principal(
+            session,
+            app_env=settings.app_env,
+            identity_subject=settings.local_development_identity_subject,
+        )
+    except LocalDevelopmentIdentityUnavailableError as error:
+        # Do not reveal whether a particular user account is missing.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Identity service is temporarily unavailable. Try again later.",
+        ) from error
+
+
+def get_authorized_knowledge_tenant(
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+) -> Tenant:
+    """Return the local tenant only after organization membership permits reading."""
+    try:
+        return authorize_tenant_action(
+            session,
+            principal=principal,
+            tenant_slug=DEMO_TENANT_SLUG,
+            permission="knowledge:read",
+        ).tenant
+    except AuthorizationDeniedError as error:
+        # A 404 avoids confirming whether a protected tenant exists.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested tenant workspace was not found.",
+        ) from error
+
+
 def get_embedding_provider() -> OllamaEmbeddingClient:
     """Provide the local embedding client; tests can override this dependency."""
     return OllamaEmbeddingClient()
@@ -322,7 +371,11 @@ def get_answer_status(
     return "grounded"
 
 
-def build_ask_response(answer: GroundedAnswer) -> AskResponse:
+def build_ask_response(
+    answer: GroundedAnswer,
+    *,
+    tenant: Tenant,
+) -> AskResponse:
     """Convert internal RAG data into the safe JSON response contract."""
     citation_validation = answer.citation_validation
     safety_validation = answer.safety_validation
@@ -331,7 +384,7 @@ def build_ask_response(answer: GroundedAnswer) -> AskResponse:
         status=get_answer_status(answer),
         answer=answer.answer_text,
         # The tenant is server-controlled in this development version.
-        tenant=DEMO_TENANT_SLUG,
+        tenant=tenant.slug,
         embedding_model=answer.embedding_model,
         generation_model=answer.generation_model,
         sources=[
@@ -715,6 +768,7 @@ def ask_question(
     http_request: Request,
     response: Response,
     session: Annotated[Session, Depends(get_database_session)],
+    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
     cache: Annotated[Redis, Depends(get_redis_cache)],
     embedding_provider: Annotated[
         OllamaEmbeddingClient,
@@ -747,7 +801,7 @@ def ask_question(
 
     settings = get_settings()
     rate_limit_key = build_rate_limit_key(
-        tenant_slug=DEMO_TENANT_SLUG,
+        tenant_slug=tenant.slug,
         client_identifier=get_client_identifier(http_request),
     )
     rate_limit = check_rate_limit(
@@ -809,7 +863,7 @@ def ask_question(
 
     # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
     cache_key = build_ask_response_cache_key(
-        tenant_slug=DEMO_TENANT_SLUG,
+        tenant_slug=tenant.slug,
         question=request.question,
         limit=request.limit,
     )
@@ -853,7 +907,7 @@ def ask_question(
     try:
         answer = answer_grounded_question(
             session=session,
-            tenant_slug=DEMO_TENANT_SLUG,
+            tenant_slug=tenant.slug,
             question=request.question,
             embedding_provider=embedding_provider,
             chat_provider=chat_provider,
@@ -879,7 +933,10 @@ def ask_question(
             detail="The local AI provider is unavailable. Check Ollama and retry.",
         ) from error
 
-    ask_response = build_ask_response(answer)
+    ask_response = build_ask_response(
+        answer,
+        tenant=tenant,
+    )
 
     observe_rag_request(
         status=ask_response.status,
