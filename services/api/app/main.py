@@ -39,7 +39,7 @@ from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
 )
-from app.services.ingestion import get_or_create_tenant, ingest_document
+from app.services.ingestion import ingest_document
 from app.services.local_identity import (
     LocalDevelopmentIdentityUnavailableError,
     get_local_development_principal,
@@ -326,6 +326,25 @@ def get_authorized_knowledge_tenant(
         ) from error
 
 
+def get_authorized_document_write_tenant(
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+) -> Tenant:
+    """Return the tenant only when membership permits document uploads."""
+    try:
+        return authorize_tenant_action(
+            session,
+            principal=principal,
+            tenant_slug=DEMO_TENANT_SLUG,
+            permission="documents:write",
+        ).tenant
+    except AuthorizationDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested tenant workspace was not found.",
+        ) from error
+
+
 def get_embedding_provider() -> OllamaEmbeddingClient:
     """Provide the local embedding client; tests can override this dependency."""
     return OllamaEmbeddingClient()
@@ -537,6 +556,7 @@ async def upload_document(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
+    tenant: Annotated[Tenant, Depends(get_authorized_document_write_tenant)],
     document_store: Annotated[
         RedactedDocumentStore | None,
         Depends(get_redacted_document_store),
@@ -557,7 +577,7 @@ async def upload_document(
     except ValueError as error:
         record_document_upload_audit_event(
             session,
-            tenant=None,
+            tenant=tenant,
             request_id=http_request.state.request_id,
             outcome="denied",
             upload_status="validation_failed",
@@ -574,11 +594,7 @@ async def upload_document(
         ) from error
 
     try:
-        tenant = get_or_create_tenant(
-            session,
-            slug=DEMO_TENANT_SLUG,
-            name="NimbusCart",
-        )
+        # The authorization dependency already returned the permitted tenant.
         ingestion_result = ingest_document(
             session=session,
             tenant=tenant,
@@ -593,7 +609,7 @@ async def upload_document(
         session.rollback()
         record_document_upload_audit_event(
             session,
-            tenant=None,
+            tenant=tenant,
             request_id=http_request.state.request_id,
             outcome="failed",
             upload_status="storage_unavailable",
@@ -623,7 +639,7 @@ async def upload_document(
     return DocumentUploadResponse(
         status="accepted",
         action=ingestion_result.action,
-        tenant=DEMO_TENANT_SLUG,
+        tenant=tenant.slug,
         source_path=ingestion_result.source_path,
     )
 

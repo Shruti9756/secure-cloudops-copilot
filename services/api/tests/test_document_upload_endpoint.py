@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 
 from app.db.models import AuditEvent, KnowledgeDocument, Tenant
 from app.infrastructure.s3 import S3DocumentStorageUnavailableError
-from app.main import app, get_database_session
+from app.main import (
+    app,
+    get_authorized_document_write_tenant,
+    get_database_session,
+)
 from app.services.document_storage import get_redacted_document_store
 
 client = TestClient(app)
@@ -26,6 +30,16 @@ class UnavailableRedactedDocumentStore:
         raise S3DocumentStorageUnavailableError("S3 document storage is unavailable")
 
 
+def make_tenant() -> Tenant:
+    """Create the tenant returned by the test authorization override."""
+    return Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+
+
 def make_pdf_upload_bytes() -> bytes:
     """Build a digital PDF that travels through the real upload endpoint."""
     pdf_document = pymupdf.open()
@@ -42,14 +56,12 @@ def make_pdf_upload_bytes() -> bytes:
 
 def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> None:
     session = Mock()
-    tenant = Tenant(
-        id=uuid4(),
-        slug="nimbuscart",
-        name="NimbusCart",
-    )
-    # First query finds the tenant; second query confirms this source path is new.
-    session.scalar.side_effect = [tenant, None]
+    tenant = make_tenant()
+
+    # Ingestion checks whether this document path is new.
+    session.scalar.return_value = None
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_authorized_document_write_tenant] = lambda: tenant
     app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
@@ -118,7 +130,10 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
 
 def test_document_upload_rejects_and_audits_unsupported_files() -> None:
     session = Mock()
+    tenant = make_tenant()
+
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_authorized_document_write_tenant] = lambda: tenant
     app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
@@ -139,7 +154,7 @@ def test_document_upload_rejects_and_audits_unsupported_files() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Only .md, .txt, .pdf, and .docx uploads are supported"
-    assert audit_event.tenant_id is None
+    assert audit_event.tenant_id == tenant.id
     assert audit_event.event_type == "document.upload"
     assert audit_event.outcome == "denied"
     assert audit_event.request_id == response.headers["x-request-id"]
@@ -156,13 +171,11 @@ def test_document_upload_rejects_and_audits_unsupported_files() -> None:
 def test_document_upload_extracts_redacts_and_audits_pdf_content() -> None:
     """PDF uploads use the same redaction, ingestion, and audit boundaries as text."""
     session = Mock()
-    tenant = Tenant(
-        id=uuid4(),
-        slug="nimbuscart",
-        name="NimbusCart",
-    )
-    session.scalar.side_effect = [tenant, None]
+    tenant = make_tenant()
+
+    session.scalar.return_value = None
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_authorized_document_write_tenant] = lambda: tenant
     app.dependency_overrides[get_redacted_document_store] = lambda: None
 
     try:
@@ -205,6 +218,7 @@ def test_document_upload_extracts_redacts_and_audits_pdf_content() -> None:
         "types": ["BEARER_TOKEN"],
     }
 
+    assert audit_event.tenant_id == tenant.id
     assert audit_event.event_type == "document.upload"
     assert audit_event.outcome == "succeeded"
     assert audit_event.event_metadata == {
@@ -217,14 +231,11 @@ def test_document_upload_extracts_redacts_and_audits_pdf_content() -> None:
 
 def test_document_upload_returns_safe_503_when_configured_storage_is_unavailable() -> None:
     session = Mock()
-    tenant = Tenant(
-        id=uuid4(),
-        slug="nimbuscart",
-        name="NimbusCart",
-    )
-    session.scalar.side_effect = [tenant, None]
+    tenant = make_tenant()
 
+    session.scalar.return_value = None
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_authorized_document_write_tenant] = lambda: tenant
     app.dependency_overrides[get_redacted_document_store] = lambda: (
         UnavailableRedactedDocumentStore()
     )
@@ -249,7 +260,7 @@ def test_document_upload_returns_safe_503_when_configured_storage_is_unavailable
     assert response.json() == {
         "detail": "Document storage is temporarily unavailable. Try again later."
     }
-    assert audit_event.tenant_id is None
+    assert audit_event.tenant_id == tenant.id
     assert audit_event.event_type == "document.upload"
     assert audit_event.outcome == "failed"
     assert audit_event.request_id == response.headers["x-request-id"]
