@@ -651,20 +651,21 @@ async def upload_document(
 )
 def list_document_statuses(
     session: Annotated[Session, Depends(get_database_session)],
+    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
 ) -> DocumentStatusListResponse:
     """List safe processing statuses for documents in the server-controlled tenant."""
 
+    # The authorization dependency resolved this tenant from verified membership.
     statement = (
         select(KnowledgeDocument)
-        .join(Tenant)
-        .where(Tenant.slug == DEMO_TENANT_SLUG)
+        .where(KnowledgeDocument.tenant_id == tenant.id)
         .order_by(KnowledgeDocument.source_path)
     )
     documents = list(session.scalars(statement))
 
     # Never expose document content, chunks, vectors, hashes, or redaction metadata here.
     return DocumentStatusListResponse(
-        tenant=DEMO_TENANT_SLUG,
+        tenant=tenant.slug,
         documents=[
             DocumentStatusItemResponse(
                 source_path=document.source_path,
@@ -697,6 +698,7 @@ def get_deployment_context(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
+    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
 ) -> DeploymentContextResponse:
     """Return one indexed deployment record from the server-controlled tenant."""
 
@@ -707,7 +709,7 @@ def get_deployment_context(
         select(KnowledgeDocument)
         .join(Tenant)
         .where(
-            Tenant.slug == DEMO_TENANT_SLUG,
+            KnowledgeDocument.tenant_id == tenant.id,
             KnowledgeDocument.source_path == source_path,
             # Pending or changed documents must not be exposed as approved context.
             KnowledgeDocument.ingestion_status == "embedded",
@@ -722,7 +724,7 @@ def get_deployment_context(
         )
 
     return DeploymentContextResponse(
-        tenant=DEMO_TENANT_SLUG,
+        tenant=tenant.slug,
         service=service,
         version=version,
         title=document.title,
@@ -745,6 +747,7 @@ def get_runbook_context(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
+    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
 ) -> RunbookContextResponse:
     """Return one indexed runbook from the server-controlled tenant."""
 
@@ -755,7 +758,7 @@ def get_runbook_context(
         select(KnowledgeDocument)
         .join(Tenant)
         .where(
-            Tenant.slug == DEMO_TENANT_SLUG,
+            KnowledgeDocument.tenant_id == tenant.id,
             KnowledgeDocument.source_path == source_path,
             # Pending or changed documents must not be exposed as approved context.
             KnowledgeDocument.ingestion_status == "embedded",
@@ -770,7 +773,7 @@ def get_runbook_context(
         )
 
     return RunbookContextResponse(
-        tenant=DEMO_TENANT_SLUG,
+        tenant=tenant.slug,
         runbook_name=runbook_name,
         title=document.title,
         source_identifier=document.source_path,

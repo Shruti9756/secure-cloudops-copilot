@@ -1,18 +1,38 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app.main import app, get_database_session
+from app.db.models import Tenant
+from app.main import (
+    app,
+    get_authorized_knowledge_tenant,
+    get_database_session,
+)
 
 client = TestClient(app)
 
 
+def make_authorized_tenant() -> Tenant:
+    """Create the tenant returned by the test authorization override."""
+    return Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+
+
 def install_fake_session(document: object | None) -> Mock:
-    """Replace PostgreSQL with a predictable session for endpoint tests."""
+    """Replace PostgreSQL and authorization with predictable test dependencies."""
     session = Mock()
     session.scalar.return_value = document
+    tenant = make_authorized_tenant()
+
     app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: tenant
+
     return session
 
 
