@@ -30,4 +30,5 @@ def get_cognito_principal(
         user_id=user.id,
         identity_subject=user.identity_subject,
         display_name=user.display_name,
+        authentication_source="cognito",
     )

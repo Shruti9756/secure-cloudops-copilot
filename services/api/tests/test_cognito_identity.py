@@ -28,6 +28,7 @@ def test_get_cognito_principal_returns_database_backed_identity() -> None:
     assert result.user_id == user.id
     assert result.identity_subject == "cognito-stable-subject-123"
     assert result.display_name == "Shruti Demo"
+    assert result.authentication_source == "cognito"
 
 
 def test_get_cognito_principal_rejects_unprovisioned_identity() -> None:

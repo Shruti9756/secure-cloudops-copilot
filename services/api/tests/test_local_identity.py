@@ -97,6 +97,7 @@ def test_get_local_development_principal_returns_the_bootstrapped_user() -> None
     assert principal.user_id == user.id
     assert principal.identity_subject == "local-demo-admin"
     assert principal.display_name == "Local Demo Administrator"
+    assert principal.authentication_source == "local"
 
 
 def test_local_development_identity_is_denied_outside_development() -> None:

@@ -514,8 +514,21 @@ def build_ask_response(
     )
 
 
+def get_audit_actor(
+    principal: AuthenticatedPrincipal,
+) -> tuple[str, str | None]:
+    """Return safe audit identity fields without recording credentials or email."""
+
+    if principal.authentication_source == "cognito":
+        return "cognito_user", principal.identity_subject
+
+    # Keep the earlier local-demo audit format for local development.
+    return "local_demo", None
+
+
 def record_ask_audit_event(
     session: Session,
+    principal: AuthenticatedPrincipal,
     *,
     request_id: str,
     event_type: str,
@@ -526,6 +539,7 @@ def record_ask_audit_event(
     ask_response: AskResponse | None = None,
 ) -> None:
     """Record one safe ask-request outcome without logging raw AI content."""
+    actor_type, actor_id = get_audit_actor(principal)
     audit_tenant = session.scalar(select(Tenant).where(Tenant.slug == DEMO_TENANT_SLUG))
 
     record_audit_event(
@@ -533,8 +547,8 @@ def record_ask_audit_event(
         tenant=audit_tenant,
         event_type=event_type,
         outcome=outcome,
-        actor_type="local_demo",
-        actor_id=None,
+        actor_type=actor_type,
+        actor_id=actor_id,
         request_id=request_id,
         metadata={
             "audit_status": audit_status,
@@ -559,6 +573,7 @@ def record_ask_audit_event(
 
 def record_document_upload_audit_event(
     session: Session,
+    principal: AuthenticatedPrincipal,
     *,
     tenant: Tenant | None,
     request_id: str,
@@ -569,13 +584,14 @@ def record_document_upload_audit_event(
     ingestion_action: str | None,
 ) -> None:
     """Record a document-upload outcome without storing a filename or document content."""
+    actor_type, actor_id = get_audit_actor(principal)
     record_audit_event(
         session,
         tenant=tenant,
         event_type="document.upload",
         outcome=outcome,
-        actor_type="local_demo",
-        actor_id=None,
+        actor_type=actor_type,
+        actor_id=actor_id,
         request_id=request_id,
         metadata={
             "upload_status": upload_status,
@@ -638,6 +654,7 @@ async def upload_document(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
     tenant: Annotated[Tenant, Depends(get_authorized_document_write_tenant)],
     document_store: Annotated[
         RedactedDocumentStore | None,
@@ -659,6 +676,7 @@ async def upload_document(
     except ValueError as error:
         record_document_upload_audit_event(
             session,
+            principal=principal,
             tenant=tenant,
             request_id=http_request.state.request_id,
             outcome="denied",
@@ -692,6 +710,7 @@ async def upload_document(
         record_document_upload_audit_event(
             session,
             tenant=tenant,
+            principal=principal,
             request_id=http_request.state.request_id,
             outcome="failed",
             upload_status="storage_unavailable",
@@ -708,6 +727,7 @@ async def upload_document(
 
     record_document_upload_audit_event(
         session,
+        principal=principal,
         tenant=tenant,
         request_id=http_request.state.request_id,
         outcome="succeeded",
@@ -869,6 +889,7 @@ def ask_question(
     http_request: Request,
     response: Response,
     session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
     tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
     cache: Annotated[Redis, Depends(get_redis_cache)],
     embedding_provider: Annotated[
@@ -888,6 +909,7 @@ def ask_question(
         )
         record_ask_audit_event(
             session,
+            principal=principal,
             request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="denied",
@@ -920,6 +942,7 @@ def ask_question(
         )
         record_ask_audit_event(
             session,
+            principal=principal,
             request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="failed",
@@ -940,6 +963,7 @@ def ask_question(
         )
         record_ask_audit_event(
             session,
+            principal=principal,
             request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="denied",
@@ -991,6 +1015,7 @@ def ask_question(
                 )
                 record_ask_audit_event(
                     session,
+                    principal=principal,
                     event_type="rag.answer_completed",
                     outcome="succeeded",
                     audit_status="cache_hit",
@@ -1022,6 +1047,7 @@ def ask_question(
         )
         record_ask_audit_event(
             session,
+            principal=principal,
             event_type="rag.answer_request",
             outcome="failed",
             audit_status="model_provider_unavailable",
@@ -1060,6 +1086,7 @@ def ask_question(
 
     record_ask_audit_event(
         session,
+        principal=principal,
         event_type="rag.answer_completed",
         outcome=audit_outcome,
         audit_status="completed",

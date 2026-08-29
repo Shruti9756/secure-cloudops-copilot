@@ -10,6 +10,7 @@ from app.db.models import Membership, Tenant
 # These are the only roles and permissions supported by the V0.2 baseline.
 type MembershipRole = Literal["admin", "manager", "engineer"]
 type Permission = Literal["knowledge:read", "documents:write"]
+type AuthenticationSource = Literal["local", "cognito"]
 
 # Keep permissions in code, rather than trusting a role name sent by a browser.
 ROLE_PERMISSIONS: dict[MembershipRole, frozenset[Permission]] = {
@@ -29,11 +30,13 @@ class AuthorizationDeniedError(PermissionError):
 
 @dataclass(frozen=True)
 class AuthenticatedPrincipal:
-    """A verified user identity; Cognito will provide these values in a later step."""
+    """A verified caller; database memberships remain the authorization source."""
 
     user_id: UUID
     identity_subject: str
     display_name: str
+    # Existing unit-test and local-demo principals remain local by default.
+    authentication_source: AuthenticationSource = "local"
 
 
 @dataclass(frozen=True)

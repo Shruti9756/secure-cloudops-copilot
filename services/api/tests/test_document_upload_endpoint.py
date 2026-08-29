@@ -1,7 +1,9 @@
+from collections.abc import Iterator
 from unittest.mock import Mock
 from uuid import uuid4
 
 import pymupdf
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db.models import AuditEvent, KnowledgeDocument, Tenant
@@ -9,11 +11,28 @@ from app.infrastructure.s3 import S3DocumentStorageUnavailableError
 from app.main import (
     app,
     get_authorized_document_write_tenant,
+    get_current_principal,
     get_database_session,
 )
+from app.services.authorization import AuthenticatedPrincipal
 from app.services.document_storage import get_redacted_document_store
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def install_local_principal() -> Iterator[None]:
+    """Keep upload endpoint tests focused on ingestion instead of authentication."""
+
+    app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+        user_id=uuid4(),
+        identity_subject="local-demo-admin",
+        display_name="Local Demo Administrator",
+    )
+
+    yield
+
+    app.dependency_overrides.clear()
 
 
 class UnavailableRedactedDocumentStore:
@@ -63,7 +82,13 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
     app.dependency_overrides[get_database_session] = lambda: session
     app.dependency_overrides[get_authorized_document_write_tenant] = lambda: tenant
     app.dependency_overrides[get_redacted_document_store] = lambda: None
-
+    cognito_principal = AuthenticatedPrincipal(
+        user_id=uuid4(),
+        identity_subject="cognito-subject-123",
+        display_name="Cognito Test Administrator",
+        authentication_source="cognito",
+    )
+    app.dependency_overrides[get_current_principal] = lambda: cognito_principal
     try:
         response = client.post(
             "/api/v1/documents",
@@ -118,6 +143,8 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
     assert audit_event.tenant_id == tenant.id
     assert audit_event.event_type == "document.upload"
     assert audit_event.outcome == "succeeded"
+    assert audit_event.actor_type == "cognito_user"
+    assert audit_event.actor_id == "cognito-subject-123"
     assert audit_event.request_id == response.headers["x-request-id"]
     assert audit_event.event_metadata == {
         "upload_status": "accepted",

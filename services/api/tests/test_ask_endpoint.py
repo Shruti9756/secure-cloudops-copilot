@@ -10,10 +10,12 @@ from app.main import (
     app,
     get_authorized_knowledge_tenant,
     get_chat_provider,
+    get_current_principal,
     get_database_session,
     get_embedding_provider,
     get_redis_cache,
 )
+from app.services.authorization import AuthenticatedPrincipal
 from app.services.citations import CitationValidationResult
 from app.services.metrics import METRICS_REGISTRY
 from app.services.rag import GroundedAnswer
@@ -76,6 +78,11 @@ def install_fake_dependencies(
         )
 
     app.dependency_overrides[get_database_session] = lambda: database_session
+    app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+        user_id=uuid4(),
+        identity_subject="local-demo-admin",
+        display_name="Local Demo Administrator",
+    )
     # Endpoint tests focus on RAG behavior; authorization has separate tests.
     app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: Tenant(
         id=uuid4(),
@@ -497,6 +504,7 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
     assert audit_event.event_type == "rag.answer_completed"
     assert audit_event.outcome == "succeeded"
     assert audit_event.actor_type == "local_demo"
+    assert audit_event.actor_id is None
     assert audit_event.request_id == response.headers["x-request-id"]
     assert audit_event.event_metadata == {
         "audit_status": "completed",

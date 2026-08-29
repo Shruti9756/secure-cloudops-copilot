@@ -61,4 +61,5 @@ def get_local_development_principal(
         user_id=user.id,
         identity_subject=user.identity_subject,
         display_name=user.display_name,
+        authentication_source="local",
     )
