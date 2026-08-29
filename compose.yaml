@@ -7,6 +7,9 @@ services:
       dockerfile: Dockerfile
     environment:
       APP_ENV: development
+      IDENTITY_PROVIDER: ${IDENTITY_PROVIDER:-local}
+      COGNITO_ISSUER: ${COGNITO_ISSUER:-}
+      COGNITO_APP_CLIENT_ID: ${COGNITO_APP_CLIENT_ID:-}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       # Containers use Docker's internal DNS, not 127.0.0.1.
