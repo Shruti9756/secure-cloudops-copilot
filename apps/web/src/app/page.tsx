@@ -1,5 +1,6 @@
 import { AskCopilot } from "@/components/ask-copilot";
 import { DocumentManagement } from "@/components/document-management";
+import { CognitoSignIn } from "@/components/cognito-sign-in";
 
 const services = [
   {
@@ -50,6 +51,7 @@ export default function Home() {
             <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm font-medium text-emerald-300">
               System operational
             </span>
+            <CognitoSignIn />
             <a className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
                 href="#knowledge-documents"
               >

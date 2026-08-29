@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { getApiAuthorizationHeaders } from "@/lib/cognito-auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -177,6 +178,7 @@ export function AskCopilot() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getApiAuthorizationHeaders(),
         },
         // The browser can submit only the question and a safe retrieval limit.
         // Tenant selection and all RAG security decisions remain on the API.
