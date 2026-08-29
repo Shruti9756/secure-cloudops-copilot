@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable, Iterator
+from functools import lru_cache
 from time import perf_counter
 from typing import Annotated, Literal
 from urllib.error import URLError
@@ -24,6 +25,13 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import KnowledgeDocument, Tenant
 from app.db.session import get_session_factory
+from app.infrastructure.cognito import (
+    COGNITO_AUTHENTICATION_FAILURE_MESSAGE,
+    COGNITO_IDENTITY_PROVIDER_UNAVAILABLE_MESSAGE,
+    CognitoAccessTokenVerifier,
+    CognitoInvalidAccessTokenError,
+    CognitoJwksUnavailableError,
+)
 from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
@@ -34,6 +42,10 @@ from app.services.authorization import (
     AuthenticatedPrincipal,
     AuthorizationDeniedError,
     authorize_tenant_action,
+)
+from app.services.cognito_identity import (
+    CognitoUserNotProvisionedError,
+    get_cognito_principal,
 )
 from app.services.document_storage import (
     RedactedDocumentStore,
@@ -195,10 +207,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=DEVELOPMENT_FRONTEND_ORIGINS,
-    # No cookies or authorization headers exist yet, so credentials remain disabled.
+    # Browser requests use explicit bearer tokens, never cross-site cookies.
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Authorization", "Content-Type"],
     # Allow the approved frontend to display safe cache observability metadata.
     expose_headers=[
         "Retry-After",
@@ -286,23 +298,93 @@ def get_database_session() -> Iterator[Session]:
         yield session
 
 
+COGNITO_AUTHORIZATION_FAILURE_MESSAGE = (
+    "The authenticated identity is not authorized to access SecureCloudOps."
+)
+
+
+def _get_bearer_access_token(request: Request) -> str:
+    """Extract one bearer token without logging or storing credential contents."""
+
+    authorization_header = request.headers.get("Authorization")
+
+    if authorization_header is None:
+        raise CognitoInvalidAccessTokenError(COGNITO_AUTHENTICATION_FAILURE_MESSAGE)
+
+    scheme, separator, access_token = authorization_header.partition(" ")
+
+    if scheme.lower() != "bearer" or not separator or not access_token.strip():
+        raise CognitoInvalidAccessTokenError(COGNITO_AUTHENTICATION_FAILURE_MESSAGE)
+
+    return access_token.strip()
+
+
+@lru_cache
+def get_cognito_access_token_verifier(
+    issuer: str,
+    app_client_id: str,
+) -> CognitoAccessTokenVerifier:
+    """Reuse Cognito JWKS-key caching for the stable server configuration."""
+
+    return CognitoAccessTokenVerifier(
+        issuer=issuer,
+        app_client_id=app_client_id,
+    )
+
+
 def get_current_principal(
+    request: Request,
     session: Annotated[Session, Depends(get_database_session)],
 ) -> AuthenticatedPrincipal:
-    """Resolve the temporary local principal until Cognito JWT validation is added."""
+    """Resolve either the local development identity or a verified Cognito user."""
+
     settings = get_settings()
 
-    try:
-        return get_local_development_principal(
-            session,
-            app_env=settings.app_env,
-            identity_subject=settings.local_development_identity_subject,
-        )
-    except LocalDevelopmentIdentityUnavailableError as error:
-        # Do not reveal whether a particular user account is missing.
+    if settings.identity_provider == "local":
+        try:
+            return get_local_development_principal(
+                session,
+                app_env=settings.app_env,
+                identity_subject=settings.local_development_identity_subject,
+            )
+        except LocalDevelopmentIdentityUnavailableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Identity service is temporarily unavailable. Try again later.",
+            ) from error
+
+    if not settings.cognito_issuer or not settings.cognito_app_client_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Identity service is temporarily unavailable. Try again later.",
+            detail=COGNITO_IDENTITY_PROVIDER_UNAVAILABLE_MESSAGE,
+        )
+
+    try:
+        verified_token = get_cognito_access_token_verifier(
+            settings.cognito_issuer,
+            settings.cognito_app_client_id,
+        ).verify(_get_bearer_access_token(request))
+
+        return get_cognito_principal(
+            session,
+            subject=verified_token.subject,
+        )
+    except CognitoJwksUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=COGNITO_IDENTITY_PROVIDER_UNAVAILABLE_MESSAGE,
+        ) from error
+    except CognitoInvalidAccessTokenError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=COGNITO_AUTHENTICATION_FAILURE_MESSAGE,
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from error
+    except CognitoUserNotProvisionedError as error:
+        # A verified identity still needs an explicit local user and membership.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=COGNITO_AUTHORIZATION_FAILURE_MESSAGE,
         ) from error
 
 

@@ -21,6 +21,10 @@ ENV_FILE = find_env_file()
 
 class Settings(BaseSettings):
     app_env: str = "development"
+    # Local mode remains the default until Cognito browser login is configured.
+    identity_provider: Literal["local", "cognito"] = "local"
+    cognito_issuer: str | None = None
+    cognito_app_client_id: str | None = None
     # Temporary local identity used only while APP_ENV is development.
     # Cognito JWT validation will replace this adapter in a later V0.2 step.
     local_development_identity_subject: str = "local-demo-admin"
