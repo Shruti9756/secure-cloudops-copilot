@@ -1,5 +1,5 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -7,6 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import DocumentChunk, KnowledgeDocument, Tenant
+from app.services.document_access import (
+    ALL_DOCUMENT_ACCESS_LEVELS,
+    DEFAULT_DOCUMENT_ACCESS_LEVELS,
+    DocumentAccessLevel,
+)
 
 # The database schema uses vector(1024), so every query vector must match it.
 EMBEDDING_DIMENSIONS = 1024
@@ -36,6 +41,9 @@ def retrieve_relevant_chunks(
     tenant_slug: str,
     query_vector: Sequence[float],
     embedding_model: str,
+    allowed_document_access_levels: Collection[
+        DocumentAccessLevel
+    ] = DEFAULT_DOCUMENT_ACCESS_LEVELS,
     limit: int = DEFAULT_RETRIEVAL_LIMIT,
     max_cosine_distance: float = MAX_RETRIEVAL_COSINE_DISTANCE,
 ) -> list[RetrievedChunk]:
@@ -48,6 +56,9 @@ def retrieve_relevant_chunks(
     normalized_embedding_model = embedding_model.strip()
     normalized_query_vector = _normalize_query_vector(query_vector)
     normalized_max_cosine_distance = _normalize_max_cosine_distance(max_cosine_distance)
+    normalized_document_access_levels = _normalize_document_access_levels(
+        allowed_document_access_levels
+    )
 
     if not normalized_tenant_slug:
         raise ValueError("Tenant slug must not be empty")
@@ -81,6 +92,7 @@ def retrieve_relevant_chunks(
         .join(KnowledgeDocument.tenant)
         .where(
             Tenant.slug == normalized_tenant_slug,
+            KnowledgeDocument.access_level.in_(normalized_document_access_levels),
             # Never retrieve incomplete documents or chunks without vectors.
             KnowledgeDocument.ingestion_status == "embedded",
             DocumentChunk.embedding.is_not(None),
@@ -149,3 +161,18 @@ def _normalize_max_cosine_distance(max_cosine_distance: float) -> float:
         raise ValueError("Maximum cosine distance must be between 0 and 2")
 
     return normalized_distance
+
+
+def _normalize_document_access_levels(
+    allowed_document_access_levels: Collection[DocumentAccessLevel],
+) -> frozenset[DocumentAccessLevel]:
+    """Reject unknown or empty document-visibility rules before SQL executes."""
+    normalized_access_levels = frozenset(allowed_document_access_levels)
+
+    if not normalized_access_levels:
+        raise ValueError("At least one document access level is required")
+
+    if not normalized_access_levels.issubset(ALL_DOCUMENT_ACCESS_LEVELS):
+        raise ValueError("Document access levels must be supported")
+
+    return normalized_access_levels

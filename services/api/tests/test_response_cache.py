@@ -2,6 +2,10 @@ import json
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from app.services.document_access import (
+    ALL_DOCUMENT_ACCESS_LEVELS,
+    DEFAULT_DOCUMENT_ACCESS_LEVELS,
+)
 from app.services.response_cache import (
     ASK_RESPONSE_CACHE_TTL_SECONDS,
     CacheLookup,
@@ -42,24 +46,34 @@ def test_cache_key_is_tenant_scoped_and_does_not_expose_raw_question() -> None:
 
     cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
+        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
     )
     equivalent_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
+        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question="why did checkout latency increase?",
         limit=2,
     )
     other_tenant_cache_key = build_ask_response_cache_key(
         tenant_slug="other-tenant",
+        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+    )
+    privileged_cache_key = build_ask_response_cache_key(
+        tenant_slug="nimbuscart",
+        question=question,
+        limit=2,
+        document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
     )
 
     assert cache_key == equivalent_cache_key
     assert cache_key != other_tenant_cache_key
     assert question not in cache_key
-    assert "securecloudops:ask:v1:nimbuscart:2:" in cache_key
+    assert cache_key != privileged_cache_key
+    assert "securecloudops:ask:v2:nimbuscart:" in cache_key
 
 
 def test_load_cached_response_returns_valid_json_payload() -> None:

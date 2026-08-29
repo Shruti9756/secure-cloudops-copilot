@@ -47,6 +47,7 @@ from app.services.cognito_identity import (
     CognitoUserNotProvisionedError,
     get_cognito_principal,
 )
+from app.services.document_access import DEFAULT_DOCUMENT_ACCESS_LEVELS
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
@@ -1008,6 +1009,7 @@ def ask_question(
     # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
     cache_key = build_ask_response_cache_key(
         tenant_slug=tenant.slug,
+        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=request.question,
         limit=request.limit,
     )

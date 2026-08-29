@@ -52,6 +52,7 @@ def test_retrieve_relevant_chunks_scopes_query_and_maps_results() -> None:
     assert "JOIN tenants" in statement_sql
     assert "tenants.slug" in statement_sql
     assert "knowledge_documents.ingestion_status" in statement_sql
+    assert "knowledge_documents.access_level" in statement_sql
     assert "document_chunks.embedding IS NOT NULL" in statement_sql
     assert "document_chunks.embedding_model" in statement_sql
 
@@ -143,6 +144,21 @@ def test_retrieve_relevant_chunks_rejects_an_invalid_relevance_threshold() -> No
             query_vector=make_query_vector(),
             embedding_model=TEST_EMBEDDING_MODEL,
             max_cosine_distance=2.1,
+        )
+
+    session.execute.assert_not_called()
+
+
+def test_retrieve_relevant_chunks_rejects_unknown_document_access_levels() -> None:
+    session = Mock()
+
+    with pytest.raises(ValueError, match="Document access levels must be supported"):
+        retrieve_relevant_chunks(
+            session=session,
+            tenant_slug="nimbuscart",
+            query_vector=make_query_vector(),
+            embedding_model=TEST_EMBEDDING_MODEL,
+            allowed_document_access_levels={"unexpected"},
         )
 
     session.execute.assert_not_called()

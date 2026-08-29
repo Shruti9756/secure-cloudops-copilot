@@ -9,22 +9,25 @@ type DocumentAccessLevel = Literal["organization", "restricted"]
 ORGANIZATION_DOCUMENT_ACCESS: DocumentAccessLevel = "organization"
 RESTRICTED_DOCUMENT_ACCESS: DocumentAccessLevel = "restricted"
 
+ALL_DOCUMENT_ACCESS_LEVELS: frozenset[DocumentAccessLevel] = frozenset(
+    {
+        ORGANIZATION_DOCUMENT_ACCESS,
+        RESTRICTED_DOCUMENT_ACCESS,
+    }
+)
+
+DEFAULT_DOCUMENT_ACCESS_LEVELS: frozenset[DocumentAccessLevel] = frozenset(
+    {
+        ORGANIZATION_DOCUMENT_ACCESS,
+    }
+)
+
 READABLE_DOCUMENT_ACCESS_LEVELS_BY_ROLE: dict[
     MembershipRole,
     frozenset[DocumentAccessLevel],
 ] = {
-    "admin": frozenset(
-        {
-            ORGANIZATION_DOCUMENT_ACCESS,
-            RESTRICTED_DOCUMENT_ACCESS,
-        }
-    ),
-    "manager": frozenset(
-        {
-            ORGANIZATION_DOCUMENT_ACCESS,
-            RESTRICTED_DOCUMENT_ACCESS,
-        }
-    ),
+    "admin": ALL_DOCUMENT_ACCESS_LEVELS,
+    "manager": ALL_DOCUMENT_ACCESS_LEVELS,
     "engineer": frozenset({ORGANIZATION_DOCUMENT_ACCESS}),
 }
 

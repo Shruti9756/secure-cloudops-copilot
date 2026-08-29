@@ -17,6 +17,7 @@ from app.main import (
 )
 from app.services.authorization import AuthenticatedPrincipal
 from app.services.citations import CitationValidationResult
+from app.services.document_access import DEFAULT_DOCUMENT_ACCESS_LEVELS
 from app.services.metrics import METRICS_REGISTRY
 from app.services.rag import GroundedAnswer
 from app.services.response_cache import build_ask_response_cache_key
@@ -351,6 +352,7 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 
     expected_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
+        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
     )
