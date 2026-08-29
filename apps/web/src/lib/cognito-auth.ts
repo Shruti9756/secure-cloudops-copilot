@@ -112,6 +112,14 @@ export function getApiAuthorizationHeaders(): Record<string, string> {
     : {};
 }
 
+export function getApiWorkspaceHeaders(): Record<string, string> {
+  const workspaceSlug = process.env.NEXT_PUBLIC_WORKSPACE_SLUG?.trim();
+
+  return workspaceSlug
+    ? { "X-Workspace-Slug": workspaceSlug }
+    : {};
+}
+
 export async function beginCognitoSignIn(): Promise<void> {
   const configuration = getCognitoConfiguration();
   const state = createRandomBase64Url(32);

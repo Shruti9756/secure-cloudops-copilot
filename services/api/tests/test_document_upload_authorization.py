@@ -45,6 +45,7 @@ def test_engineer_cannot_upload_documents() -> None:
                     "text/markdown",
                 )
             },
+            headers={"X-Workspace-Slug": "nimbuscart"},
         )
     finally:
         app.dependency_overrides.clear()

@@ -37,6 +37,7 @@ def test_ask_hides_a_tenant_when_the_user_has_no_membership() -> None:
                 "question": "Why did checkout latency increase?",
                 "limit": 1,
             },
+            headers={"X-Workspace-Slug": "nimbuscart"},
         )
     finally:
         app.dependency_overrides.clear()

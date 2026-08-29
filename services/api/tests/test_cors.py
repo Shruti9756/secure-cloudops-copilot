@@ -11,7 +11,7 @@ def test_cors_allows_the_local_nextjs_origin_to_post_json() -> None:
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "authorization,content-type",
+            "Access-Control-Request-Headers": "authorization,content-type,x-workspace-slug",
         },
     )
 
@@ -20,6 +20,7 @@ def test_cors_allows_the_local_nextjs_origin_to_post_json() -> None:
     assert "POST" in response.headers["access-control-allow-methods"]
     assert "content-type" in response.headers["access-control-allow-headers"].lower()
     assert "authorization" in response.headers["access-control-allow-headers"].lower()
+    assert "x-workspace-slug" in response.headers["access-control-allow-headers"].lower()
 
 
 def test_cors_rejects_an_unapproved_browser_origin() -> None:

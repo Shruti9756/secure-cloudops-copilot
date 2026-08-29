@@ -77,11 +77,14 @@ from app.services.upload_validation import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     validate_and_extract_upload,
 )
+from app.services.workspace import (
+    WORKSPACE_CONTEXT_HEADER,
+    WorkspaceContextError,
+    normalize_workspace_slug,
+)
 
 APP_VERSION = "0.1.0"
 
-# Temporary development scope. Authentication will derive the tenant later.
-DEMO_TENANT_SLUG = "nimbuscart"
 
 # These patterns make the server build the only permitted deployment document path.
 SERVICE_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
@@ -210,7 +213,7 @@ app.add_middleware(
     # Browser requests use explicit bearer tokens, never cross-site cookies.
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", WORKSPACE_CONTEXT_HEADER],
     # Allow the approved frontend to display safe cache observability metadata.
     expose_headers=[
         "Retry-After",
@@ -388,16 +391,28 @@ def get_current_principal(
         ) from error
 
 
+def get_requested_workspace_slug(request: Request) -> str:
+    """Read and validate the workspace selector before membership authorization."""
+    try:
+        return normalize_workspace_slug(request.headers.get(WORKSPACE_CONTEXT_HEADER))
+    except WorkspaceContextError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+
+
 def get_authorized_knowledge_tenant(
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+    workspace_slug: Annotated[str, Depends(get_requested_workspace_slug)],
 ) -> Tenant:
     """Return the local tenant only after organization membership permits reading."""
     try:
         return authorize_tenant_action(
             session,
             principal=principal,
-            tenant_slug=DEMO_TENANT_SLUG,
+            tenant_slug=workspace_slug,
             permission="knowledge:read",
         ).tenant
     except AuthorizationDeniedError as error:
@@ -411,13 +426,14 @@ def get_authorized_knowledge_tenant(
 def get_authorized_document_write_tenant(
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+    workspace_slug: Annotated[str, Depends(get_requested_workspace_slug)],
 ) -> Tenant:
     """Return the tenant only when membership permits document uploads."""
     try:
         return authorize_tenant_action(
             session,
             principal=principal,
-            tenant_slug=DEMO_TENANT_SLUG,
+            tenant_slug=workspace_slug,
             permission="documents:write",
         ).tenant
     except AuthorizationDeniedError as error:
@@ -529,6 +545,7 @@ def get_audit_actor(
 def record_ask_audit_event(
     session: Session,
     principal: AuthenticatedPrincipal,
+    tenant: Tenant,
     *,
     request_id: str,
     event_type: str,
@@ -540,11 +557,10 @@ def record_ask_audit_event(
 ) -> None:
     """Record one safe ask-request outcome without logging raw AI content."""
     actor_type, actor_id = get_audit_actor(principal)
-    audit_tenant = session.scalar(select(Tenant).where(Tenant.slug == DEMO_TENANT_SLUG))
 
     record_audit_event(
         session,
-        tenant=audit_tenant,
+        tenant=tenant,
         event_type=event_type,
         outcome=outcome,
         actor_type=actor_type,
@@ -910,6 +926,7 @@ def ask_question(
         record_ask_audit_event(
             session,
             principal=principal,
+            tenant=tenant,
             request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="denied",
@@ -943,6 +960,7 @@ def ask_question(
         record_ask_audit_event(
             session,
             principal=principal,
+            tenant=tenant,
             request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="failed",
@@ -964,6 +982,7 @@ def ask_question(
         record_ask_audit_event(
             session,
             principal=principal,
+            tenant=tenant,
             request_id=http_request.state.request_id,
             event_type="rag.answer_request",
             outcome="denied",
@@ -1016,6 +1035,7 @@ def ask_question(
                 record_ask_audit_event(
                     session,
                     principal=principal,
+                    tenant=tenant,
                     event_type="rag.answer_completed",
                     outcome="succeeded",
                     audit_status="cache_hit",
@@ -1048,6 +1068,7 @@ def ask_question(
         record_ask_audit_event(
             session,
             principal=principal,
+            tenant=tenant,
             event_type="rag.answer_request",
             outcome="failed",
             audit_status="model_provider_unavailable",
@@ -1087,6 +1108,7 @@ def ask_question(
     record_ask_audit_event(
         session,
         principal=principal,
+        tenant=tenant,
         event_type="rag.answer_completed",
         outcome=audit_outcome,
         audit_status="completed",

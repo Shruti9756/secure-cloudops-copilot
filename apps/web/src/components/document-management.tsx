@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, type FormEvent, useState } from "react";
-import { getApiAuthorizationHeaders } from "@/lib/cognito-auth";
+import { getApiAuthorizationHeaders , getApiWorkspaceHeaders } from "@/lib/cognito-auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -85,7 +85,10 @@ export function DocumentManagement() {
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
-        headers: getApiAuthorizationHeaders(),
+        headers: {
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
+        },
       });
       const payload: unknown = await response.json();
 

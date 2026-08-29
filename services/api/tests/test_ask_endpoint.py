@@ -65,17 +65,22 @@ def install_fake_dependencies(
     *,
     redis_cache: FakeRedisCache | None = None,
     database_session: Mock | None = None,
+    tenant: Tenant | None = None,
 ) -> FakeRedisCache:
     """Make endpoint tests independent from PostgreSQL, Redis, and local Ollama."""
     cache = redis_cache or FakeRedisCache()
 
-    if database_session is None:
-        database_session = Mock()
-        database_session.scalar.return_value = Tenant(
+    if tenant is None:
+        tenant = Tenant(
             id=uuid4(),
+            organization_id=uuid4(),
             slug="nimbuscart",
             name="NimbusCart",
         )
+
+    if database_session is None:
+        database_session = Mock()
+        database_session.scalar.return_value = tenant
 
     app.dependency_overrides[get_database_session] = lambda: database_session
     app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
@@ -84,12 +89,7 @@ def install_fake_dependencies(
         display_name="Local Demo Administrator",
     )
     # Endpoint tests focus on RAG behavior; authorization has separate tests.
-    app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: Tenant(
-        id=uuid4(),
-        organization_id=uuid4(),
-        slug="nimbuscart",
-        name="NimbusCart",
-    )
+    app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: tenant
     app.dependency_overrides[get_redis_cache] = lambda: cache
     app.dependency_overrides[get_embedding_provider] = lambda: object()
     app.dependency_overrides[get_chat_provider] = lambda: object()
@@ -477,9 +477,11 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
         slug="nimbuscart",
         name="NimbusCart",
     )
-    audit_session.scalar.return_value = tenant
 
-    install_fake_dependencies(database_session=audit_session)
+    install_fake_dependencies(
+        database_session=audit_session,
+        tenant=tenant,
+    )
     monkeypatch.setattr(
         "app.main.answer_grounded_question",
         lambda **_: make_grounded_answer(),
@@ -578,13 +580,14 @@ def test_ask_endpoint_audits_rate_limit_denials(
         slug="nimbuscart",
         name="NimbusCart",
     )
-    audit_session.scalar.return_value = tenant
+
     cache = FakeRedisCache(rate_limit_result=(11, 23))
     rag_call = Mock()
 
     install_fake_dependencies(
         redis_cache=cache,
         database_session=audit_session,
+        tenant=tenant,
     )
     monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
 
