@@ -53,3 +53,12 @@ def test_audit_event_preserves_safe_tenant_scoped_security_metadata() -> None:
     assert {"question", "answer", "content"}.isdisjoint(audit_column_names)
     assert "ix_audit_events_event_type" in audit_index_names
     assert "ix_audit_events_tenant_created_at" in audit_index_names
+
+
+def test_document_access_level_is_constrained_and_defaults_to_organization() -> None:
+    constraint_names = {constraint.name for constraint in KnowledgeDocument.__table__.constraints}
+    access_level_column = KnowledgeDocument.__table__.c.access_level
+
+    assert "ck_knowledge_documents_access_level" in constraint_names
+    assert access_level_column.nullable is False
+    assert str(access_level_column.server_default.arg) == "organization"

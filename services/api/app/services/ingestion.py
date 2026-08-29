@@ -145,6 +145,7 @@ def ingest_document(
                 source_sha256=content_hash,
                 content=safe_content,
                 ingestion_status="pending",
+                access_level="organization",
                 document_metadata=document_metadata,
             )
         )

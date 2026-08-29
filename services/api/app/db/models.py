@@ -156,6 +156,10 @@ class KnowledgeDocument(Base):
             "source_path",
             name="uq_knowledge_documents_tenant_source_path",
         ),
+        CheckConstraint(
+            "access_level IN ('organization', 'restricted')",
+            name="ck_knowledge_documents_access_level",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -172,6 +176,11 @@ class KnowledgeDocument(Base):
     ingestion_status: Mapped[str] = mapped_column(
         String(32),
         server_default="pending",
+        nullable=False,
+    )
+    access_level: Mapped[str] = mapped_column(
+        String(32),
+        server_default="organization",
         nullable=False,
     )
     document_metadata: Mapped[dict[str, Any]] = mapped_column(

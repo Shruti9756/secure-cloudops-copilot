@@ -96,6 +96,7 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
 
     assert result.action == "created"
     assert isinstance(stored_document, KnowledgeDocument)
+    assert stored_document.access_level == "organization"
     assert stored_document.title == "Checkout Runbook"
     assert stored_document.content == (
         "# Checkout Runbook\n\n"
