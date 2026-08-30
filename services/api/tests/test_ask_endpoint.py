@@ -8,16 +8,23 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from app.db.models import Tenant
 from app.main import (
     app,
-    get_authorized_knowledge_tenant,
+    get_authorized_knowledge_access,
     get_chat_provider,
     get_current_principal,
     get_database_session,
     get_embedding_provider,
     get_redis_cache,
 )
-from app.services.authorization import AuthenticatedPrincipal
+from app.services.authorization import (
+    AuthenticatedPrincipal,
+    AuthorizedTenant,
+    MembershipRole,
+)
 from app.services.citations import CitationValidationResult
-from app.services.document_access import DEFAULT_DOCUMENT_ACCESS_LEVELS
+from app.services.document_access import (
+    ALL_DOCUMENT_ACCESS_LEVELS,
+    DEFAULT_DOCUMENT_ACCESS_LEVELS,
+)
 from app.services.metrics import METRICS_REGISTRY
 from app.services.rag import GroundedAnswer
 from app.services.response_cache import build_ask_response_cache_key
@@ -67,6 +74,7 @@ def install_fake_dependencies(
     redis_cache: FakeRedisCache | None = None,
     database_session: Mock | None = None,
     tenant: Tenant | None = None,
+    role: MembershipRole = "admin",
 ) -> FakeRedisCache:
     """Make endpoint tests independent from PostgreSQL, Redis, and local Ollama."""
     cache = redis_cache or FakeRedisCache()
@@ -90,7 +98,10 @@ def install_fake_dependencies(
         display_name="Local Demo Administrator",
     )
     # Endpoint tests focus on RAG behavior; authorization has separate tests.
-    app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: tenant
+    app.dependency_overrides[get_authorized_knowledge_access] = lambda: AuthorizedTenant(
+        tenant=tenant,
+        role=role,
+    )
     app.dependency_overrides[get_redis_cache] = lambda: cache
     app.dependency_overrides[get_embedding_provider] = lambda: object()
     app.dependency_overrides[get_chat_provider] = lambda: object()
@@ -189,6 +200,7 @@ def test_ask_endpoint_returns_a_grounded_server_scoped_response(
     # The browser did not choose the tenant; the server enforced the demo tenant.
     assert captured_arguments["tenant_slug"] == "nimbuscart"
     assert captured_arguments["limit"] == 2
+    assert captured_arguments["allowed_document_access_levels"] == ALL_DOCUMENT_ACCESS_LEVELS
 
 
 def test_ask_endpoint_records_a_bounded_grounded_rag_metric(
@@ -352,7 +364,7 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 
     expected_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
-        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
+        document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
     )
@@ -613,3 +625,34 @@ def test_ask_endpoint_audits_rate_limit_denials(
     assert "question" not in audit_event.event_metadata
     rag_call.assert_not_called()
     audit_session.commit.assert_called_once()
+
+
+def test_ask_endpoint_limits_engineers_to_organization_documents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An engineer may use RAG but cannot retrieve restricted evidence."""
+    captured_arguments: dict[str, object] = {}
+
+    def fake_answer_grounded_question(**kwargs: object) -> GroundedAnswer:
+        captured_arguments.update(kwargs)
+        return make_grounded_answer()
+
+    install_fake_dependencies(role="engineer")
+    monkeypatch.setattr(
+        "app.main.answer_grounded_question",
+        fake_answer_grounded_question,
+    )
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={
+                "question": "Why did checkout latency increase?",
+                "limit": 2,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert captured_arguments["allowed_document_access_levels"] == DEFAULT_DOCUMENT_ACCESS_LEVELS

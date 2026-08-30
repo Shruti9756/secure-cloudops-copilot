@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,10 @@ from app.services.citations import (
     CitationValidationResult,
     source_identifier_for_chunk,
     validate_answer_citations,
+)
+from app.services.document_access import (
+    DEFAULT_DOCUMENT_ACCESS_LEVELS,
+    DocumentAccessLevel,
 )
 from app.services.embeddings import EmbeddingProvider
 from app.services.retrieval import (
@@ -75,6 +80,9 @@ def answer_grounded_question(
     question: str,
     embedding_provider: EmbeddingProvider,
     chat_provider: ChatProvider,
+    allowed_document_access_levels: Collection[
+        DocumentAccessLevel
+    ] = DEFAULT_DOCUMENT_ACCESS_LEVELS,
     limit: int = DEFAULT_RETRIEVAL_LIMIT,
 ) -> GroundedAnswer:
     """Answer one question using only tenant-scoped retrieved evidence.
@@ -107,6 +115,7 @@ def answer_grounded_question(
         query_vector=query_embedding.vector,
         # This prevents accidental comparison between different vector-model spaces.
         embedding_model=query_embedding.model_id,
+        allowed_document_access_levels=allowed_document_access_levels,
         limit=limit,
     )
 

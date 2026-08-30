@@ -41,13 +41,14 @@ from app.services.audit import AuditOutcome, record_audit_event
 from app.services.authorization import (
     AuthenticatedPrincipal,
     AuthorizationDeniedError,
+    AuthorizedTenant,
     authorize_tenant_action,
 )
 from app.services.cognito_identity import (
     CognitoUserNotProvisionedError,
     get_cognito_principal,
 )
-from app.services.document_access import DEFAULT_DOCUMENT_ACCESS_LEVELS
+from app.services.document_access import get_readable_document_access_levels
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
@@ -403,25 +404,35 @@ def get_requested_workspace_slug(request: Request) -> str:
         ) from error
 
 
-def get_authorized_knowledge_tenant(
+def get_authorized_knowledge_access(
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
     workspace_slug: Annotated[str, Depends(get_requested_workspace_slug)],
-) -> Tenant:
-    """Return the local tenant only after organization membership permits reading."""
+) -> AuthorizedTenant:
+    """Return a verified tenant and membership role for knowledge reads."""
     try:
         return authorize_tenant_action(
             session,
             principal=principal,
             tenant_slug=workspace_slug,
             permission="knowledge:read",
-        ).tenant
+        )
     except AuthorizationDeniedError as error:
         # A 404 avoids confirming whether a protected tenant exists.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Requested tenant workspace was not found.",
         ) from error
+
+
+def get_authorized_knowledge_tenant(
+    authorized_tenant: Annotated[
+        AuthorizedTenant,
+        Depends(get_authorized_knowledge_access),
+    ],
+) -> Tenant:
+    """Return the tenant for read-only routes that do not need role details."""
+    return authorized_tenant.tenant
 
 
 def get_authorized_document_write_tenant(
@@ -908,6 +919,10 @@ def ask_question(
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
     tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
+    authorized_tenant: Annotated[
+        AuthorizedTenant,
+        Depends(get_authorized_knowledge_access),
+    ],
     cache: Annotated[Redis, Depends(get_redis_cache)],
     embedding_provider: Annotated[
         OllamaEmbeddingClient,
@@ -919,6 +934,8 @@ def ask_question(
     ],
 ) -> AskResponse:
     """Answer one tenant-scoped question through guarded and rate-limited RAG."""
+    tenant = authorized_tenant.tenant
+    readable_document_access_levels = get_readable_document_access_levels(authorized_tenant.role)
     if not request.question.strip():
         observe_rag_request(
             status="invalid_question",
@@ -1009,7 +1026,7 @@ def ask_question(
     # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
     cache_key = build_ask_response_cache_key(
         tenant_slug=tenant.slug,
-        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
+        document_access_levels=readable_document_access_levels,
         question=request.question,
         limit=request.limit,
     )
@@ -1059,6 +1076,7 @@ def ask_question(
             question=request.question,
             embedding_provider=embedding_provider,
             chat_provider=chat_provider,
+            allowed_document_access_levels=readable_document_access_levels,
             limit=request.limit,
         )
     except (TimeoutError, URLError) as error:
