@@ -5,6 +5,7 @@ import pytest
 
 from app.db.models import KnowledgeDocument, Tenant
 from app.infrastructure.s3 import S3DocumentReference
+from app.services.document_access import RESTRICTED_DOCUMENT_ACCESS
 from app.services.ingestion import (
     calculate_content_sha256,
     extract_markdown_title,
@@ -176,4 +177,36 @@ def test_ingest_document_does_not_change_database_when_storage_mirror_fails() ->
             document_store=document_store,
         )
 
+    session.add.assert_not_called()
+
+
+def test_ingest_document_updates_access_level_without_reprocessing_same_content() -> None:
+    """A visibility-only update keeps existing embeddings valid."""
+    session = Mock()
+    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    content = "# Restricted Runbook\n\nInspect the database connection pool."
+
+    existing_document = KnowledgeDocument(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        title="Restricted Runbook",
+        source_path="runbooks/restricted.md",
+        source_sha256=calculate_content_sha256(content),
+        content=content,
+        ingestion_status="embedded",
+        access_level="organization",
+    )
+    session.scalar.return_value = existing_document
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="runbooks/restricted.md",
+        content=content,
+        access_level=RESTRICTED_DOCUMENT_ACCESS,
+    )
+
+    assert result.action == "updated"
+    assert existing_document.access_level == RESTRICTED_DOCUMENT_ACCESS
+    assert existing_document.ingestion_status == "embedded"
     session.add.assert_not_called()

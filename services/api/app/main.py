@@ -9,6 +9,7 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Request,
     Response,
@@ -48,7 +49,10 @@ from app.services.cognito_identity import (
     CognitoUserNotProvisionedError,
     get_cognito_principal,
 )
-from app.services.document_access import get_readable_document_access_levels
+from app.services.document_access import (
+    DocumentAccessLevel,
+    get_readable_document_access_levels,
+)
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
@@ -425,7 +429,6 @@ def get_authorized_knowledge_access(
         ) from error
 
 
-
 def get_authorized_document_write_tenant(
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
@@ -679,6 +682,16 @@ async def upload_document(
         RedactedDocumentStore | None,
         Depends(get_redacted_document_store),
     ],
+    access_level: Annotated[
+        DocumentAccessLevel | None,
+        Form(
+            description=(
+                "Optional document visibility: organization or restricted. "
+                "Omit it to use organization for a new document or preserve "
+                "the current level for an existing document."
+            )
+        ),
+    ] = None,
 ) -> DocumentUploadResponse:
     """Validate and ingest one supported document for the server-controlled tenant."""
     # Read one additional byte, allowing validation to reject oversized files safely.
@@ -719,6 +732,7 @@ async def upload_document(
             tenant=tenant,
             source_path=validated_upload.source_path,
             content=validated_upload.content,
+            access_level=access_level,
             ingestion_source="api-upload",
             content_type=validated_upload.content_type,
             document_store=document_store,

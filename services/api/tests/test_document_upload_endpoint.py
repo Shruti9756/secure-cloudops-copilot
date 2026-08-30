@@ -130,7 +130,7 @@ def test_document_upload_validates_redacts_commits_and_audits_safe_text() -> Non
         "Authorization: Bearer [REDACTED: BEARER_TOKEN]\n"
         "Inspect Redis eviction metrics."
     )
-    assert stored_document.ingestion_status == "pending"
+    assert stored_document.access_level == "organization"
     assert stored_document.document_metadata == {
         "content_type": "text/markdown",
         "ingestion_source": "api-upload",
@@ -299,3 +299,38 @@ def test_document_upload_returns_safe_503_when_configured_storage_is_unavailable
     }
     session.rollback.assert_called_once()
     session.commit.assert_called_once()
+
+
+def test_document_upload_accepts_a_restricted_access_level() -> None:
+    """Authorized uploaders may explicitly classify a new document as restricted."""
+    session = Mock()
+    tenant = make_tenant()
+    session.scalar.return_value = None
+
+    app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_authorized_document_write_tenant] = lambda: tenant
+    app.dependency_overrides[get_redacted_document_store] = lambda: None
+
+    try:
+        response = client.post(
+            "/api/v1/documents",
+            data={"access_level": "restricted"},
+            files={
+                "uploaded_file": (
+                    "restricted-runbook.md",
+                    b"# Restricted Runbook\n\nInspect the connection pool.",
+                    "text/markdown",
+                )
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    stored_document = next(
+        call.args[0]
+        for call in session.add.call_args_list
+        if isinstance(call.args[0], KnowledgeDocument)
+    )
+
+    assert response.status_code == 200
+    assert stored_document.access_level == "restricted"
