@@ -425,15 +425,6 @@ def get_authorized_knowledge_access(
         ) from error
 
 
-def get_authorized_knowledge_tenant(
-    authorized_tenant: Annotated[
-        AuthorizedTenant,
-        Depends(get_authorized_knowledge_access),
-    ],
-) -> Tenant:
-    """Return the tenant for read-only routes that do not need role details."""
-    return authorized_tenant.tenant
-
 
 def get_authorized_document_write_tenant(
     session: Annotated[Session, Depends(get_database_session)],
@@ -781,14 +772,22 @@ async def upload_document(
 )
 def list_document_statuses(
     session: Annotated[Session, Depends(get_database_session)],
-    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
+    authorized_tenant: Annotated[
+        AuthorizedTenant,
+        Depends(get_authorized_knowledge_access),
+    ],
 ) -> DocumentStatusListResponse:
     """List safe processing statuses for documents in the server-controlled tenant."""
+    tenant = authorized_tenant.tenant
+    readable_document_access_levels = get_readable_document_access_levels(authorized_tenant.role)
 
     # The authorization dependency resolved this tenant from verified membership.
     statement = (
         select(KnowledgeDocument)
-        .where(KnowledgeDocument.tenant_id == tenant.id)
+        .where(
+            KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.access_level.in_(readable_document_access_levels),
+        )
         .order_by(KnowledgeDocument.source_path)
     )
     documents = list(session.scalars(statement))
@@ -828,10 +827,15 @@ def get_deployment_context(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
-    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
+    authorized_tenant: Annotated[
+        AuthorizedTenant,
+        Depends(get_authorized_knowledge_access),
+    ],
 ) -> DeploymentContextResponse:
     """Return one indexed deployment record from the server-controlled tenant."""
 
+    tenant = authorized_tenant.tenant
+    readable_document_access_levels = get_readable_document_access_levels(authorized_tenant.role)
     # The caller never supplies a document path; the server constructs the only allowed one.
     source_path = f"deployments/{service}-{version}.md"
 
@@ -840,6 +844,7 @@ def get_deployment_context(
         .join(Tenant)
         .where(
             KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.access_level.in_(readable_document_access_levels),
             KnowledgeDocument.source_path == source_path,
             # Pending or changed documents must not be exposed as approved context.
             KnowledgeDocument.ingestion_status == "embedded",
@@ -877,9 +882,15 @@ def get_runbook_context(
         ),
     ],
     session: Annotated[Session, Depends(get_database_session)],
-    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
+    authorized_tenant: Annotated[
+        AuthorizedTenant,
+        Depends(get_authorized_knowledge_access),
+    ],
 ) -> RunbookContextResponse:
     """Return one indexed runbook from the server-controlled tenant."""
+
+    tenant = authorized_tenant.tenant
+    readable_document_access_levels = get_readable_document_access_levels(authorized_tenant.role)
 
     # The caller never supplies a document path; the server constructs the only allowed one.
     source_path = f"runbooks/{runbook_name}.md"
@@ -889,6 +900,7 @@ def get_runbook_context(
         .join(Tenant)
         .where(
             KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.access_level.in_(readable_document_access_levels),
             KnowledgeDocument.source_path == source_path,
             # Pending or changed documents must not be exposed as approved context.
             KnowledgeDocument.ingestion_status == "embedded",
@@ -918,7 +930,6 @@ def ask_question(
     response: Response,
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
-    tenant: Annotated[Tenant, Depends(get_authorized_knowledge_tenant)],
     authorized_tenant: Annotated[
         AuthorizedTenant,
         Depends(get_authorized_knowledge_access),

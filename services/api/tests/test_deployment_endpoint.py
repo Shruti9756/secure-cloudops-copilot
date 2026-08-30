@@ -7,9 +7,10 @@ from fastapi.testclient import TestClient
 from app.db.models import Tenant
 from app.main import (
     app,
-    get_authorized_knowledge_tenant,
+    get_authorized_knowledge_access,
     get_database_session,
 )
+from app.services.authorization import AuthorizedTenant
 
 client = TestClient(app)
 
@@ -31,7 +32,10 @@ def install_fake_session(document: object | None) -> Mock:
     tenant = make_authorized_tenant()
 
     app.dependency_overrides[get_database_session] = lambda: session
-    app.dependency_overrides[get_authorized_knowledge_tenant] = lambda: tenant
+    app.dependency_overrides[get_authorized_knowledge_access] = lambda: AuthorizedTenant(
+        tenant=tenant,
+        role="engineer",
+    )
 
     return session
 
@@ -59,6 +63,8 @@ def test_deployment_context_returns_only_the_server_scoped_indexed_record() -> N
         "content": "# Deployment Record: checkout 2.4.0\n\nApproved deployment context.",
     }
     session.scalar.assert_called_once()
+    statement_sql = str(session.scalar.call_args.args[0])
+    assert "knowledge_documents.access_level" in statement_sql
 
 
 def test_deployment_context_returns_404_when_the_approved_record_does_not_exist() -> None:
@@ -74,6 +80,8 @@ def test_deployment_context_returns_404_when_the_approved_record_does_not_exist(
         "detail": "Approved deployment context was not found.",
     }
     session.scalar.assert_called_once()
+    statement_sql = str(session.scalar.call_args.args[0])
+    assert "knowledge_documents.access_level" in statement_sql
 
 
 def test_deployment_context_rejects_invalid_service_or_version_shapes() -> None:
