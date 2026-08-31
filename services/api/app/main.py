@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import KnowledgeDocument, Tenant
+from app.db.models import KnowledgeDocument, Membership, Tenant
 from app.db.session import get_session_factory
 from app.infrastructure.cognito import (
     COGNITO_AUTHENTICATION_FAILURE_MESSAGE,
@@ -43,6 +43,7 @@ from app.services.authorization import (
     AuthenticatedPrincipal,
     AuthorizationDeniedError,
     AuthorizedTenant,
+    MembershipRole,
     authorize_tenant_action,
 )
 from app.services.cognito_identity import (
@@ -185,6 +186,20 @@ class DocumentStatusListResponse(BaseModel):
 
     tenant: str
     documents: list[DocumentStatusItemResponse]
+
+
+class WorkspaceItemResponse(BaseModel):
+    """One workspace that the verified user may select in the browser."""
+
+    slug: str
+    name: str
+    role: MembershipRole
+
+
+class WorkspaceListResponse(BaseModel):
+    """Safe list of workspaces derived from the caller's memberships."""
+
+    workspaces: list[WorkspaceItemResponse]
 
 
 class DeploymentContextResponse(BaseModel):
@@ -656,6 +671,41 @@ def readiness_check(response: Response) -> ReadinessStatus:
 @app.get("/api/v1/status", response_model=ServiceStatus, tags=["system"])
 def api_status() -> ServiceStatus:
     return get_status()
+
+
+@app.get(
+    "/api/v1/workspaces",
+    response_model=WorkspaceListResponse,
+    tags=["identity"],
+)
+def list_accessible_workspaces(
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+) -> WorkspaceListResponse:
+    """List only workspaces belonging to the verified user's organizations."""
+    statement = (
+        select(
+            Tenant.slug,
+            Tenant.name,
+            Membership.role,
+        )
+        .join(
+            Membership,
+            Membership.organization_id == Tenant.organization_id,
+        )
+        .where(Membership.user_id == principal.user_id)
+        .order_by(Tenant.slug)
+    )
+    workspaces = [
+        WorkspaceItemResponse(
+            slug=workspace_slug,
+            name=workspace_name,
+            role=role,
+        )
+        for workspace_slug, workspace_name, role in session.execute(statement)
+    ]
+
+    return WorkspaceListResponse(workspaces=workspaces)
 
 
 @app.post(
