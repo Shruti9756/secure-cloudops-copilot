@@ -1,7 +1,10 @@
 "use client";
 
 import { type ChangeEvent, type FormEvent, useState } from "react";
-import { getApiAuthorizationHeaders , getApiWorkspaceHeaders } from "@/lib/cognito-auth";
+import {
+  getApiAuthorizationHeaders,
+  getApiWorkspaceHeaders,
+} from "@/lib/cognito-auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -9,6 +12,7 @@ const API_BASE_URL =
 const MAX_DOCUMENT_UPLOAD_BYTES = 1_000_000;
 
 type DocumentIngestionStatus = "pending" | "chunked" | "embedded";
+type DocumentAccessLevel = "organization" | "restricted";
 
 type DocumentStatusItem = {
   source_path: string;
@@ -71,6 +75,8 @@ function isSupportedDocumentFile(file: File): boolean {
 export function DocumentManagement() {
   const [documents, setDocuments] = useState<DocumentStatusItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedAccessLevel, setSelectedAccessLevel] =
+    useState<DocumentAccessLevel>("organization");
   const [uploadResult, setUploadResult] =
     useState<DocumentUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -155,6 +161,7 @@ export function DocumentManagement() {
 
     // This must match FastAPI's `uploaded_file: UploadFile` parameter name.
     formData.append("uploaded_file", selectedFile);
+    formData.append("access_level", selectedAccessLevel);
 
     setIsUploading(true);
     setUploadError(null);
@@ -163,7 +170,10 @@ export function DocumentManagement() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
         method: "POST",
-        headers: getApiAuthorizationHeaders(),
+        headers: {
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
+        },
         // Do not set Content-Type: the browser adds the multipart boundary safely.
         body: formData,
       });
@@ -175,6 +185,7 @@ export function DocumentManagement() {
 
       setUploadResult(payload as DocumentUploadResponse);
       setSelectedFile(null);
+      setSelectedAccessLevel("organization");
       form.reset();
 
       // Show the newly accepted document and its initial pending status.
@@ -230,7 +241,34 @@ text, validates it, and redacts secrets before storage.
           onChange={handleFileChange}
           type="file"
         />
+        <div>
+          <label
+            className="block text-sm font-medium text-slate-300"
+            htmlFor="document-access-level"
+          >
+            Document visibility
+          </label>
 
+          <select
+            className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+            disabled={isUploading}
+            id="document-access-level"
+            onChange={(event) =>
+              setSelectedAccessLevel(
+                event.target.value as DocumentAccessLevel,
+              )
+            }
+            value={selectedAccessLevel}
+          >
+            <option value="organization">Organization</option>
+            <option value="restricted">Restricted</option>
+          </select>
+
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Organization is visible to authorized engineers. Restricted is visible
+            only to managers and administrators.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-slate-500">
             Accepted: .md, .txt, .pdf, and .docx · Maximum size: 1 MB
@@ -260,8 +298,8 @@ text, validates it, and redacts secrets before storage.
           className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-200"
           role="status"
         >
-          Upload {uploadResult.action}: {uploadResult.source_path}. Processing
-          status starts as pending.
+          Upload {uploadResult.action}: {uploadResult.source_path}. Current processing
+          status is shown below.
         </p>
       ) : null}
 
