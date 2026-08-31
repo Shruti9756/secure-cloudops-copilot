@@ -169,6 +169,13 @@ class KnowledgeDocument(Base):
         nullable=False,
         index=True,
     )
+    # Store direct organization ownership so SQL can enforce both scopes.
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     source_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)

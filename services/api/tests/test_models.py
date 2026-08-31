@@ -1,13 +1,16 @@
 from app.db.models import AuditEvent, DocumentChunk, KnowledgeDocument, Tenant
 
 
-def test_knowledge_document_belongs_to_a_tenant() -> None:
+def test_knowledge_document_has_direct_tenant_and_organization_ownership() -> None:
     foreign_key_targets = {
         foreign_key.target_fullname for foreign_key in KnowledgeDocument.__table__.foreign_keys
     }
+    index_names = {index.name for index in KnowledgeDocument.__table__.indexes}
 
     assert Tenant.__tablename__ == "tenants"
-    assert "tenants.id" in foreign_key_targets
+    assert {"tenants.id", "organizations.id"}.issubset(foreign_key_targets)
+    assert KnowledgeDocument.__table__.c.organization_id.nullable is False
+    assert "ix_knowledge_documents_organization_id" in index_names
 
 
 def test_document_source_path_is_unique_within_a_tenant() -> None:

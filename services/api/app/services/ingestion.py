@@ -153,6 +153,7 @@ def ingest_document(
         session.add(
             KnowledgeDocument(
                 tenant_id=tenant.id,
+                organization_id=tenant.organization_id,
                 title=extract_markdown_title(safe_content, fallback_title),
                 source_path=source_path,
                 source_sha256=content_hash,

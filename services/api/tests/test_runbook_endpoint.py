@@ -64,6 +64,7 @@ def test_runbook_context_returns_only_the_server_scoped_indexed_record() -> None
     session.scalar.assert_called_once()
     statement_sql = str(session.scalar.call_args.args[0])
     assert "knowledge_documents.access_level" in statement_sql
+    assert "knowledge_documents.organization_id" in statement_sql
 
 
 def test_runbook_context_returns_404_when_the_approved_record_does_not_exist() -> None:
@@ -81,6 +82,7 @@ def test_runbook_context_returns_404_when_the_approved_record_does_not_exist() -
     session.scalar.assert_called_once()
     statement_sql = str(session.scalar.call_args.args[0])
     assert "knowledge_documents.access_level" in statement_sql
+    assert "knowledge_documents.organization_id" in statement_sql
 
 
 def test_runbook_context_rejects_invalid_name_shapes() -> None:

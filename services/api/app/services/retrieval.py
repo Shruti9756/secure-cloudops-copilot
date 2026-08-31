@@ -92,6 +92,8 @@ def retrieve_relevant_chunks(
         .join(KnowledgeDocument.tenant)
         .where(
             Tenant.slug == normalized_tenant_slug,
+            # The document must still belong to the tenant's organization.
+            KnowledgeDocument.organization_id == Tenant.organization_id,
             KnowledgeDocument.access_level.in_(normalized_document_access_levels),
             # Never retrieve incomplete documents or chunks without vectors.
             KnowledgeDocument.ingestion_status == "embedded",

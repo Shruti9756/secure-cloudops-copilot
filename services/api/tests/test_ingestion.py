@@ -78,7 +78,7 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
     """The database model must receive safe text and non-sensitive audit metadata."""
     session = Mock()
     session.scalar.return_value = None
-    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart", organization_id=uuid4())
 
     result = ingest_document(
         session=session,
@@ -98,6 +98,7 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
     assert result.action == "created"
     assert isinstance(stored_document, KnowledgeDocument)
     assert stored_document.access_level == "organization"
+    assert stored_document.organization_id == tenant.organization_id
     assert stored_document.title == "Checkout Runbook"
     assert stored_document.content == (
         "# Checkout Runbook\n\n"

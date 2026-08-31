@@ -850,6 +850,7 @@ def list_document_statuses(
         select(KnowledgeDocument)
         .where(
             KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.organization_id == tenant.organization_id,
             KnowledgeDocument.access_level.in_(readable_document_access_levels),
         )
         .order_by(KnowledgeDocument.source_path)
@@ -908,6 +909,7 @@ def get_deployment_context(
         .join(Tenant)
         .where(
             KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.organization_id == tenant.organization_id,
             KnowledgeDocument.access_level.in_(readable_document_access_levels),
             KnowledgeDocument.source_path == source_path,
             # Pending or changed documents must not be exposed as approved context.
@@ -964,6 +966,7 @@ def get_runbook_context(
         .join(Tenant)
         .where(
             KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.organization_id == tenant.organization_id,
             KnowledgeDocument.access_level.in_(readable_document_access_levels),
             KnowledgeDocument.source_path == source_path,
             # Pending or changed documents must not be exposed as approved context.

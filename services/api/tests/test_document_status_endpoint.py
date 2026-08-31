@@ -89,5 +89,6 @@ def test_list_document_statuses_returns_safe_tenant_scoped_lifecycle_data() -> N
     # The route uses the tenant returned by authorization, not client-supplied scope.
     statement_sql = str(session.scalars.call_args.args[0])
     assert "knowledge_documents.access_level" in statement_sql
+    assert "knowledge_documents.organization_id" in statement_sql
     assert "JOIN tenants" not in statement_sql
     session.commit.assert_not_called()
