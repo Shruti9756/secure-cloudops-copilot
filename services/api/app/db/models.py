@@ -224,6 +224,12 @@ class AuditEvent(Base):
     __table_args__ = (
         # The common investigation query is: tenant events ordered by newest first.
         Index("ix_audit_events_tenant_created_at", "tenant_id", "created_at"),
+        # Organization-level investigations should not need to scan every audit event.
+        Index(
+            "ix_audit_events_organization_created_at",
+            "organization_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -234,6 +240,13 @@ class AuditEvent(Base):
         Uuid,
         ForeignKey("tenants.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    # Some events happen before a workspace is known, so organization scope is nullable.
+    organization_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=False,
     )
     event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)

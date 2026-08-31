@@ -517,6 +517,7 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
     assert response.status_code == 200
     assert response.headers["x-cache"] == "MISS"
     assert audit_event.tenant_id == tenant.id
+    assert audit_event.organization_id == tenant.organization_id
     assert audit_event.event_type == "rag.answer_completed"
     assert audit_event.outcome == "succeeded"
     assert audit_event.actor_type == "local_demo"
