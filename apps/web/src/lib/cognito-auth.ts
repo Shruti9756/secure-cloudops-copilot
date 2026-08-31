@@ -1,6 +1,8 @@
 const COGNITO_STATE_STORAGE_KEY = "securecloudops.cognito.oauth-state";
 const COGNITO_VERIFIER_STORAGE_KEY = "securecloudops.cognito.pkce-verifier";
 const COGNITO_SESSION_STORAGE_KEY = "securecloudops.cognito.access-session";
+const ACTIVE_WORKSPACE_STORAGE_KEY =
+  "securecloudops.active-workspace-slug";
 
 type CognitoConfiguration = {
   managedLoginBaseUrl: string;
@@ -112,8 +114,32 @@ export function getApiAuthorizationHeaders(): Record<string, string> {
     : {};
 }
 
+export function getActiveWorkspaceSlug(): string | null {
+  const storedWorkspaceSlug =
+    typeof window === "undefined"
+      ? null
+      : window.sessionStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY)?.trim();
+
+  if (storedWorkspaceSlug) {
+    return storedWorkspaceSlug;
+  }
+
+  return process.env.NEXT_PUBLIC_WORKSPACE_SLUG?.trim() || null;
+}
+
+export function setActiveWorkspaceSlug(workspaceSlug: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.setItem(
+    ACTIVE_WORKSPACE_STORAGE_KEY,
+    workspaceSlug.trim(),
+  );
+}
+
 export function getApiWorkspaceHeaders(): Record<string, string> {
-  const workspaceSlug = process.env.NEXT_PUBLIC_WORKSPACE_SLUG?.trim();
+  const workspaceSlug = getActiveWorkspaceSlug();
 
   return workspaceSlug
     ? { "X-Workspace-Slug": workspaceSlug }
