@@ -69,6 +69,7 @@ from app.services.metrics import (
     observe_rag_request,
     render_metrics,
 )
+from app.services.prompt_injection import detect_prompt_injection
 from app.services.rag import GroundedAnswer, answer_grounded_question
 from app.services.rate_limit import (
     build_rate_limit_key,
@@ -575,9 +576,30 @@ def record_ask_audit_event(
     cache_status: str | None,
     rate_limit_remaining: int | None,
     ask_response: AskResponse | None = None,
+    prompt_injection_rule_ids: tuple[str, ...] = (),
 ) -> None:
     """Record one safe ask-request outcome without logging raw AI content."""
     actor_type, actor_id = get_audit_actor(principal)
+
+    metadata = {
+        "audit_status": audit_status,
+        "cache_status": cache_status,
+        "response_status": ask_response.status if ask_response is not None else None,
+        "source_count": len(ask_response.sources) if ask_response is not None else 0,
+        "embedding_model": ask_response.embedding_model if ask_response is not None else None,
+        "generation_model": ask_response.generation_model if ask_response is not None else None,
+        "citation_validation_passed": (
+            ask_response.citation_validation_passed if ask_response is not None else None
+        ),
+        "safety_validation_passed": (
+            ask_response.safety_validation_passed if ask_response is not None else None
+        ),
+        "rate_limit_remaining": rate_limit_remaining,
+    }
+
+    if prompt_injection_rule_ids:
+        # Rule IDs are bounded application constants; never record the raw question.
+        metadata["prompt_injection_rule_ids"] = ",".join(prompt_injection_rule_ids)
 
     record_audit_event(
         session,
@@ -587,21 +609,7 @@ def record_ask_audit_event(
         actor_type=actor_type,
         actor_id=actor_id,
         request_id=request_id,
-        metadata={
-            "audit_status": audit_status,
-            "cache_status": cache_status,
-            "response_status": ask_response.status if ask_response is not None else None,
-            "source_count": len(ask_response.sources) if ask_response is not None else 0,
-            "embedding_model": ask_response.embedding_model if ask_response is not None else None,
-            "generation_model": ask_response.generation_model if ask_response is not None else None,
-            "citation_validation_passed": (
-                ask_response.citation_validation_passed if ask_response is not None else None
-            ),
-            "safety_validation_passed": (
-                ask_response.safety_validation_passed if ask_response is not None else None
-            ),
-            "rate_limit_remaining": rate_limit_remaining,
-        },
+        metadata=metadata,
     )
 
     # The audit event must be durable before this request outcome is considered recorded.
@@ -1100,6 +1108,33 @@ def ask_question(
     response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
     response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
     response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_after_seconds)
+
+    prompt_injection_detection = detect_prompt_injection(request.question)
+
+    if prompt_injection_detection.is_suspicious:
+        observe_rag_request(
+            status="prompt_injection_detected",
+            cache_status="NOT_CHECKED",
+        )
+        record_ask_audit_event(
+            session,
+            principal=principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            event_type="rag.answer_request",
+            outcome="denied",
+            audit_status="prompt_injection_detected",
+            cache_status=None,
+            rate_limit_remaining=rate_limit.remaining,
+            prompt_injection_rule_ids=prompt_injection_detection.matched_rule_ids,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Question contains suspected prompt-injection instructions. "
+                "Rephrase it as an incident-investigation question."
+            ),
+        )
 
     # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
     cache_key = build_ask_response_cache_key(
