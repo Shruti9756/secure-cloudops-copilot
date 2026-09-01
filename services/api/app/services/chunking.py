@@ -111,6 +111,7 @@ def replace_document_chunks(
         [
             DocumentChunk(
                 document_id=document.id,
+                organization_id=document.organization_id,
                 chunk_index=text_chunk.chunk_index,
                 content=text_chunk.content,
                 content_sha256=text_chunk.content_sha256,

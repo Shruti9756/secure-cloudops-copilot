@@ -295,10 +295,17 @@ class DocumentChunk(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
-    # Tenant ownership is inherited through the document relationship.
+    # The parent document controls a chunk's lifecycle.
     document_id: Mapped[UUID] = mapped_column(
         Uuid,
         ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Chunks contain evidence sent to the model, so keep direct organization scope.
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )

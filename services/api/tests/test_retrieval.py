@@ -54,6 +54,7 @@ def test_retrieve_relevant_chunks_scopes_query_and_maps_results() -> None:
     assert "knowledge_documents.ingestion_status" in statement_sql
     assert "knowledge_documents.access_level" in statement_sql
     assert "knowledge_documents.organization_id" in statement_sql
+    assert "document_chunks.organization_id" in statement_sql
     assert "document_chunks.embedding IS NOT NULL" in statement_sql
     assert "document_chunks.embedding_model" in statement_sql
 

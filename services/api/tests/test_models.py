@@ -19,13 +19,16 @@ def test_document_source_path_is_unique_within_a_tenant() -> None:
     assert "uq_knowledge_documents_tenant_source_path" in constraint_names
 
 
-def test_document_chunk_belongs_to_a_document() -> None:
+def test_document_chunk_has_direct_document_and_organization_ownership() -> None:
     foreign_key_targets = {
         foreign_key.target_fullname for foreign_key in DocumentChunk.__table__.foreign_keys
     }
+    index_names = {index.name for index in DocumentChunk.__table__.indexes}
 
     assert KnowledgeDocument.__tablename__ == "knowledge_documents"
-    assert "knowledge_documents.id" in foreign_key_targets
+    assert {"knowledge_documents.id", "organizations.id"}.issubset(foreign_key_targets)
+    assert DocumentChunk.__table__.c.organization_id.nullable is False
+    assert "ix_document_chunks_organization_id" in index_names
 
 
 def test_document_chunk_order_is_unique_and_nonnegative() -> None:
