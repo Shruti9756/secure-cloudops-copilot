@@ -12,6 +12,7 @@ from app.services.document_access import (
     DEFAULT_DOCUMENT_ACCESS_LEVELS,
     DocumentAccessLevel,
 )
+from app.services.prompt_injection import detect_prompt_injection
 
 # The database schema uses vector(1024), so every query vector must match it.
 EMBEDDING_DIMENSIONS = 1024
@@ -77,6 +78,8 @@ def retrieve_relevant_chunks(
     distance_expression = DocumentChunk.embedding.cosine_distance(normalized_query_vector)
     cosine_distance = distance_expression.label("cosine_distance")
 
+    # Fetch a small bounded surplus because suspicious evidence is filtered below.
+    candidate_limit = limit * 3
     statement = (
         select(
             DocumentChunk.id.label("chunk_id"),
@@ -111,10 +114,10 @@ def retrieve_relevant_chunks(
             KnowledgeDocument.source_path,
             DocumentChunk.chunk_index,
         )
-        .limit(limit)
+        .limit(candidate_limit)
     )
 
-    return [
+    candidates = [
         RetrievedChunk(
             chunk_id=row.chunk_id,
             document_id=row.document_id,
@@ -126,6 +129,13 @@ def retrieve_relevant_chunks(
         )
         for row in session.execute(statement)
     ]
+
+    # Re-scan at retrieval time so existing chunks without new metadata stay protected.
+    safe_candidates = [
+        chunk for chunk in candidates if not detect_prompt_injection(chunk.content).is_suspicious
+    ]
+
+    return safe_candidates[:limit]
 
 
 def _normalize_query_vector(query_vector: Sequence[float]) -> list[float]:

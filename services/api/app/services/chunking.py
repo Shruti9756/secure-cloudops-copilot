@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DocumentChunk, KnowledgeDocument, Tenant
 from app.services.ingestion import calculate_content_sha256
+from app.services.prompt_injection import detect_prompt_injection
 
 DEFAULT_MAX_CHARS = 1200
 DEFAULT_OVERLAP_CHARS = 200
@@ -107,8 +108,12 @@ def replace_document_chunks(
     session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
     session.flush()
 
-    session.add_all(
-        [
+    chunks_to_store: list[DocumentChunk] = []
+
+    for text_chunk in text_chunks:
+        prompt_injection_detection = detect_prompt_injection(text_chunk.content)
+
+        chunks_to_store.append(
             DocumentChunk(
                 document_id=document.id,
                 organization_id=document.organization_id,
@@ -120,11 +125,16 @@ def replace_document_chunks(
                     "chunking_strategy": "character-overlap-v1",
                     "max_chars": max_chars,
                     "overlap_chars": overlap_chars,
+                    # Store bounded rule IDs, never duplicate the chunk text here.
+                    "prompt_injection": {
+                        "detected": prompt_injection_detection.is_suspicious,
+                        "rule_ids": list(prompt_injection_detection.matched_rule_ids),
+                    },
                 },
             )
-            for text_chunk in text_chunks
-        ]
-    )
+        )
+
+    session.add_all(chunks_to_store)
 
     # “chunked” means chunks exist and are ready for the later embedding stage.
     document.ingestion_status = "chunked"
