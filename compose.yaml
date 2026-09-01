@@ -14,8 +14,18 @@ services:
       REDIS_URL: redis://redis:6379/0
       # Containers use Docker's internal DNS, not 127.0.0.1.
       OLLAMA_BASE_URL: http://ollama:11434
+      # Local-only: API mirrors redacted text to private S3 and issues short-lived links.
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DOCUMENT_STORAGE_BACKEND: ${DOCUMENT_STORAGE_BACKEND:-disabled}
+      DOCUMENT_STORAGE_S3_BUCKET: ${DOCUMENT_STORAGE_S3_BUCKET:-}
+      DOCUMENT_STORAGE_PRESIGNED_DOWNLOAD_EXPIRY_SECONDS: ${DOCUMENT_STORAGE_PRESIGNED_DOWNLOAD_EXPIRY_SECONDS:-300}
+      HOME: /app
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      # Read-only local development credentials; never commit this folder.
+      - "${USERPROFILE}/.aws:/app/.aws:ro"
     depends_on:
       postgres:
         condition: service_healthy

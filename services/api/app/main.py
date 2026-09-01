@@ -11,6 +11,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -57,6 +58,7 @@ from app.services.document_access import (
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
+    redacted_document_reference_from_metadata,
 )
 from app.services.ingestion import ingest_document
 from app.services.local_identity import (
@@ -172,6 +174,14 @@ class DocumentUploadResponse(BaseModel):
     action: Literal["created", "updated", "unchanged"]
     tenant: str
     source_path: str
+
+
+class DocumentDownloadResponse(BaseModel):
+    """A short-lived, server-authorized URL for redacted document text."""
+
+    source_path: str
+    download_url: str
+    expires_in_seconds: int
 
 
 class DocumentStatusItemResponse(BaseModel):
@@ -647,6 +657,36 @@ def record_document_upload_audit_event(
     )
 
 
+def record_document_download_audit_event(
+    session: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    tenant: Tenant,
+    request_id: str,
+    outcome: AuditOutcome,
+    download_status: str,
+    source_path: str | None,
+    expires_in_seconds: int | None,
+) -> None:
+    """Record signed-download issuance without storing a signed URL."""
+    actor_type, actor_id = get_audit_actor(principal)
+
+    record_audit_event(
+        session,
+        tenant=tenant,
+        event_type="document.download_url_issued",
+        outcome=outcome,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        request_id=request_id,
+        metadata={
+            "download_status": download_status,
+            "source_path": source_path,
+            "expires_in_seconds": expires_in_seconds,
+        },
+    )
+
+
 @app.get("/", response_model=ServiceStatus, include_in_schema=False)
 def root() -> ServiceStatus:
     return get_status()
@@ -876,6 +916,102 @@ def list_document_statuses(
             )
             for document in documents
         ],
+    )
+
+
+@app.get(
+    "/api/v1/documents/download",
+    response_model=DocumentDownloadResponse,
+    tags=["documents"],
+)
+def create_document_download_url(
+    source_path: Annotated[
+        str,
+        Query(
+            min_length=1,
+            max_length=1024,
+            description="A document source path returned by the document-status endpoint.",
+        ),
+    ],
+    http_request: Request,
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+    authorized_tenant: Annotated[
+        AuthorizedTenant,
+        Depends(get_authorized_knowledge_access),
+    ],
+    document_store: Annotated[
+        RedactedDocumentStore | None,
+        Depends(get_redacted_document_store),
+    ],
+) -> DocumentDownloadResponse:
+    """Issue a short-lived URL only for an authorized redacted document copy."""
+    tenant = authorized_tenant.tenant
+    readable_document_access_levels = get_readable_document_access_levels(authorized_tenant.role)
+
+    statement = select(KnowledgeDocument).where(
+        KnowledgeDocument.tenant_id == tenant.id,
+        KnowledgeDocument.organization_id == tenant.organization_id,
+        KnowledgeDocument.access_level.in_(readable_document_access_levels),
+        KnowledgeDocument.source_path == source_path,
+    )
+    document = session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested document is not available.",
+        )
+
+    storage_reference = redacted_document_reference_from_metadata(document.document_metadata)
+
+    if document_store is None or storage_reference is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested document is not available.",
+        )
+
+    expires_in_seconds = get_settings().document_storage_presigned_download_expiry_seconds
+
+    try:
+        download_url = document_store.create_presigned_download_url(
+            reference=storage_reference,
+            expires_in_seconds=expires_in_seconds,
+        )
+    except S3DocumentStorageUnavailableError as error:
+        record_document_download_audit_event(
+            session,
+            principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            outcome="failed",
+            download_status="storage_unavailable",
+            source_path=None,
+            expires_in_seconds=None,
+        )
+        session.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document storage is temporarily unavailable. Try again later.",
+        ) from error
+
+    record_document_download_audit_event(
+        session,
+        principal,
+        tenant=tenant,
+        request_id=http_request.state.request_id,
+        outcome="succeeded",
+        download_status="issued",
+        source_path=document.source_path,
+        expires_in_seconds=expires_in_seconds,
+    )
+    session.commit()
+
+    return DocumentDownloadResponse(
+        source_path=document.source_path,
+        download_url=download_url,
+        expires_in_seconds=expires_in_seconds,
     )
 
 

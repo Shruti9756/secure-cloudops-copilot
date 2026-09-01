@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # Disabled keeps Docker and local tests independent from AWS credentials.
     document_storage_backend: Literal["disabled", "s3"] = "disabled"
     document_storage_s3_bucket: str | None = None
+    document_storage_presigned_download_expiry_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=900,
+    )
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",

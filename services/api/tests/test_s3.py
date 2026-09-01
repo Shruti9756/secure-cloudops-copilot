@@ -22,6 +22,7 @@ class FakeS3Client:
 
     def __init__(self) -> None:
         self.put_object_calls: list[dict[str, Any]] = []
+        self.presigned_url_calls: list[dict[str, Any]] = []
 
     def put_object(self, **kwargs: Any) -> dict[str, Any]:
         self.put_object_calls.append(kwargs)
@@ -30,6 +31,22 @@ class FakeS3Client:
             "VersionId": "test-version-1",
             "ETag": '"test-etag"',
         }
+
+    def generate_presigned_url(
+        self,
+        *,
+        ClientMethod: str,
+        Params: dict[str, Any],
+        ExpiresIn: int,
+    ) -> str:
+        self.presigned_url_calls.append(
+            {
+                "ClientMethod": ClientMethod,
+                "Params": Params,
+                "ExpiresIn": ExpiresIn,
+            }
+        )
+        return "https://example.test/redacted-document?signature=test"
 
 
 class FailingS3Client:
@@ -171,3 +188,68 @@ def test_s3_store_hides_aws_errors_behind_a_safe_application_error() -> None:
             redacted_content="# Safe content",
             content_sha256=TEST_DOCUMENT_HASH,
         )
+
+
+def test_s3_store_creates_a_version_pinned_presigned_download_url() -> None:
+    client = FakeS3Client()
+    store = S3RedactedDocumentStore(
+        bucket_name="secure-cloudops-test",
+        client=client,
+    )
+    reference = S3DocumentReference(
+        bucket_name="secure-cloudops-test",
+        object_key="tenants/nimbuscart/redacted-documents/uploads/redis.md.txt",
+        version_id="test-version-1",
+        e_tag='"test-etag"',
+    )
+
+    url = store.create_presigned_download_url(
+        reference=reference,
+        expires_in_seconds=300,
+    )
+
+    assert url == "https://example.test/redacted-document?signature=test"
+    assert client.presigned_url_calls == [
+        {
+            "ClientMethod": "get_object",
+            "Params": {
+                "Bucket": "secure-cloudops-test",
+                "Key": "tenants/nimbuscart/redacted-documents/uploads/redis.md.txt",
+                "VersionId": "test-version-1",
+            },
+            "ExpiresIn": 300,
+        }
+    ]
+
+
+def test_s3_store_rejects_unsafe_presigned_download_inputs() -> None:
+    client = FakeS3Client()
+    store = S3RedactedDocumentStore(
+        bucket_name="secure-cloudops-test",
+        client=client,
+    )
+    wrong_bucket_reference = S3DocumentReference(
+        bucket_name="another-bucket",
+        object_key="tenants/nimbuscart/redacted-documents/uploads/redis.md.txt",
+        version_id=None,
+        e_tag=None,
+    )
+
+    with pytest.raises(ValueError, match="configured bucket"):
+        store.create_presigned_download_url(
+            reference=wrong_bucket_reference,
+            expires_in_seconds=300,
+        )
+
+    with pytest.raises(ValueError, match="between 1 and"):
+        store.create_presigned_download_url(
+            reference=S3DocumentReference(
+                bucket_name="secure-cloudops-test",
+                object_key="tenants/nimbuscart/redacted-documents/uploads/redis.md.txt",
+                version_id=None,
+                e_tag=None,
+            ),
+            expires_in_seconds=901,
+        )
+
+    assert client.presigned_url_calls == []
