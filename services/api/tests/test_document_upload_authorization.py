@@ -54,4 +54,17 @@ def test_engineer_cannot_upload_documents() -> None:
     assert response.json() == {
         "detail": "Requested tenant workspace was not found.",
     }
-    session.add.assert_not_called()
+    audit_event = session.add.call_args.args[0]
+
+    assert audit_event.tenant_id is None
+    assert audit_event.organization_id is None
+    assert audit_event.event_type == "authorization.workspace_access"
+    assert audit_event.outcome == "denied"
+    assert audit_event.actor_type == "local_demo"
+    assert audit_event.actor_id is None
+    assert audit_event.request_id == response.headers["x-request-id"]
+    assert audit_event.event_metadata == {
+        "authorization_status": "workspace_access_denied",
+        "permission": "documents:write",
+    }
+    session.commit.assert_called_once_with()

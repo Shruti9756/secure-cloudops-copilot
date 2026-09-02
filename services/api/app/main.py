@@ -45,6 +45,7 @@ from app.services.authorization import (
     AuthorizationDeniedError,
     AuthorizedTenant,
     MembershipRole,
+    Permission,
     authorize_tenant_action,
 )
 from app.services.cognito_identity import (
@@ -435,6 +436,7 @@ def get_requested_workspace_slug(request: Request) -> str:
 
 
 def get_authorized_knowledge_access(
+    http_request: Request,
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
     workspace_slug: Annotated[str, Depends(get_requested_workspace_slug)],
@@ -448,6 +450,12 @@ def get_authorized_knowledge_access(
             permission="knowledge:read",
         )
     except AuthorizationDeniedError as error:
+        record_workspace_access_denied_audit_event(
+            session,
+            principal,
+            request_id=http_request.state.request_id,
+            permission="knowledge:read",
+        )
         # A 404 avoids confirming whether a protected tenant exists.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -456,6 +464,7 @@ def get_authorized_knowledge_access(
 
 
 def get_authorized_document_write_tenant(
+    http_request: Request,
     session: Annotated[Session, Depends(get_database_session)],
     principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
     workspace_slug: Annotated[str, Depends(get_requested_workspace_slug)],
@@ -469,6 +478,12 @@ def get_authorized_document_write_tenant(
             permission="documents:write",
         ).tenant
     except AuthorizationDeniedError as error:
+        record_workspace_access_denied_audit_event(
+            session,
+            principal,
+            request_id=http_request.state.request_id,
+            permission="documents:write",
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Requested tenant workspace was not found.",
@@ -572,6 +587,32 @@ def get_audit_actor(
 
     # Keep the earlier local-demo audit format for local development.
     return "local_demo", None
+
+
+def record_workspace_access_denied_audit_event(
+    session: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    request_id: str,
+    permission: Permission,
+) -> None:
+    """Persist a safe denial record without revealing the requested workspace."""
+    actor_type, actor_id = get_audit_actor(principal)
+
+    record_audit_event(
+        session,
+        tenant=None,
+        event_type="authorization.workspace_access",
+        outcome="denied",
+        actor_type=actor_type,
+        actor_id=actor_id,
+        request_id=request_id,
+        metadata={
+            "authorization_status": "workspace_access_denied",
+            "permission": permission,
+        },
+    )
+    session.commit()
 
 
 def record_ask_audit_event(

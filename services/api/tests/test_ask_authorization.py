@@ -63,6 +63,7 @@ def test_ask_hides_a_workspace_from_a_user_in_another_organization() -> None:
         user_id=uuid4(),
         identity_subject="nimbuscart-admin",
         display_name="NimbusCart Administrator",
+        authentication_source="cognito",
     )
     membership = Membership(
         organization_id=caller_organization_id,
@@ -87,7 +88,20 @@ def test_ask_hides_a_workspace_from_a_user_in_another_organization() -> None:
     finally:
         app.dependency_overrides.clear()
 
+    audit_event = session.add.call_args.args[0]
     assert response.status_code == 404
     assert response.json() == {
         "detail": "Requested tenant workspace was not found.",
     }
+    assert audit_event.tenant_id is None
+    assert audit_event.organization_id is None
+    assert audit_event.event_type == "authorization.workspace_access"
+    assert audit_event.outcome == "denied"
+    assert audit_event.actor_type == "cognito_user"
+    assert audit_event.actor_id == "nimbuscart-admin"
+    assert audit_event.request_id == response.headers["x-request-id"]
+    assert audit_event.event_metadata == {
+        "authorization_status": "workspace_access_denied",
+        "permission": "knowledge:read",
+    }
+    session.commit.assert_called_once_with()
