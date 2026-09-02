@@ -3,6 +3,10 @@ const COGNITO_VERIFIER_STORAGE_KEY = "securecloudops.cognito.pkce-verifier";
 const COGNITO_SESSION_STORAGE_KEY = "securecloudops.cognito.access-session";
 const ACTIVE_WORKSPACE_STORAGE_KEY =
   "securecloudops.active-workspace-slug";
+const ACTIVE_WORKSPACE_ROLE_STORAGE_KEY =
+  "securecloudops.active-workspace-role";
+
+export type WorkspaceRole = "admin" | "manager" | "engineer";
 
 type CognitoConfiguration = {
   managedLoginBaseUrl: string;
@@ -127,7 +131,27 @@ export function getActiveWorkspaceSlug(): string | null {
   return process.env.NEXT_PUBLIC_WORKSPACE_SLUG?.trim() || null;
 }
 
-export function setActiveWorkspaceSlug(workspaceSlug: string): void {
+export function getActiveWorkspaceRole(): WorkspaceRole | null {
+  const storedWorkspaceRole =
+    typeof window === "undefined"
+      ? null
+      : window.sessionStorage.getItem(ACTIVE_WORKSPACE_ROLE_STORAGE_KEY);
+
+  if (
+    storedWorkspaceRole === "admin" ||
+    storedWorkspaceRole === "manager" ||
+    storedWorkspaceRole === "engineer"
+  ) {
+    return storedWorkspaceRole;
+  }
+
+  return null;
+}
+
+export function setActiveWorkspaceContext(
+  workspaceSlug: string,
+  workspaceRole: WorkspaceRole,
+): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -135,6 +159,10 @@ export function setActiveWorkspaceSlug(workspaceSlug: string): void {
   window.sessionStorage.setItem(
     ACTIVE_WORKSPACE_STORAGE_KEY,
     workspaceSlug.trim(),
+  );
+  window.sessionStorage.setItem(
+    ACTIVE_WORKSPACE_ROLE_STORAGE_KEY,
+    workspaceRole,
   );
 }
 
@@ -234,6 +262,8 @@ export async function completeCognitoSignIn(
     } satisfies StoredAccessSession),
   );
 
+  window.sessionStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  window.sessionStorage.removeItem(ACTIVE_WORKSPACE_ROLE_STORAGE_KEY);
   window.sessionStorage.removeItem(COGNITO_STATE_STORAGE_KEY);
   window.sessionStorage.removeItem(COGNITO_VERIFIER_STORAGE_KEY);
 }

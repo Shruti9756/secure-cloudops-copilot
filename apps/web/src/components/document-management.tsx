@@ -4,6 +4,7 @@ import { type ChangeEvent, type FormEvent, useState } from "react";
 import {
   getApiAuthorizationHeaders,
   getApiWorkspaceHeaders,
+  getActiveWorkspaceRole,
 } from "@/lib/cognito-auth";
 
 const API_BASE_URL =
@@ -79,6 +80,9 @@ function isSupportedDocumentFile(file: File): boolean {
 }
 
 export function DocumentManagement() {
+  const activeWorkspaceRole = getActiveWorkspaceRole();
+  const canUploadDocuments =
+    activeWorkspaceRole === "admin" || activeWorkspaceRole === "manager";
   const [documents, setDocuments] = useState<DocumentStatusItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedAccessLevel, setSelectedAccessLevel] =
@@ -151,6 +155,13 @@ export function DocumentManagement() {
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (!canUploadDocuments) {
+      setUploadError(
+        "Only workspace administrators and managers may upload documents.",
+      );
+      return;
+    }
 
     if (selectedFile === null) {
       setUploadError("Choose a supported document before uploading.");
@@ -271,7 +282,16 @@ text, validates it, and redacts secrets before storage.
           {isLoadingDocuments ? "Refreshing..." : "Refresh statuses"}
         </button>
       </div>
-
+      {!canUploadDocuments ? (
+        <p
+          className="mt-5 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100"
+          role="status"
+        >
+          {activeWorkspaceRole === "engineer"
+            ? "Engineers can read organization documents but cannot upload or update them. Ask a manager or administrator to make document changes."
+            : "Choose a workspace to load your document permissions."}
+        </p>
+      ) : null}
       <form className="mt-5 space-y-3" onSubmit={handleUpload}>
         <label
           className="block text-sm font-medium text-slate-300"
@@ -283,7 +303,7 @@ text, validates it, and redacts secrets before storage.
         <input
           accept=".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           className="block w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300 file:mr-4 file:rounded-md file:border-0 file:bg-cyan-400 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-950 hover:file:bg-cyan-300"
-          disabled={isUploading}
+          disabled={isUploading || !canUploadDocuments}
           id="knowledge-file"
           onChange={handleFileChange}
           type="file"
@@ -298,7 +318,7 @@ text, validates it, and redacts secrets before storage.
 
           <select
             className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
-            disabled={isUploading}
+            disabled={isUploading || !canUploadDocuments}
             id="document-access-level"
             onChange={(event) =>
               setSelectedAccessLevel(
@@ -323,7 +343,7 @@ text, validates it, and redacts secrets before storage.
 
           <button
             className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-            disabled={isUploading || selectedFile === null}
+            disabled={isUploading || selectedFile === null || !canUploadDocuments}
             type="submit"
           >
             {isUploading ? "Uploading..." : "Upload document"}

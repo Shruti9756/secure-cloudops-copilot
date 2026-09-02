@@ -5,13 +5,13 @@ import { type ChangeEvent, useState } from "react";
 import {
   getActiveWorkspaceSlug,
   getApiAuthorizationHeaders,
-  setActiveWorkspaceSlug,
+  setActiveWorkspaceContext,
+  type WorkspaceRole,
 } from "@/lib/cognito-auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-type WorkspaceRole = "admin" | "manager" | "engineer";
 
 type Workspace = {
   slug: string;
@@ -59,7 +59,10 @@ export function WorkspaceSelector() {
 
       if (selectedWorkspace) {
         setSelectedWorkspaceSlug(selectedWorkspace.slug);
-        setActiveWorkspaceSlug(selectedWorkspace.slug);
+        setActiveWorkspaceContext(
+          selectedWorkspace.slug,
+          selectedWorkspace.role,
+        );
       }
     } catch (caughtError) {
       setError(
@@ -74,9 +77,21 @@ export function WorkspaceSelector() {
 
   function handleWorkspaceChange(event: ChangeEvent<HTMLSelectElement>) {
     const workspaceSlug = event.target.value;
+    const selectedWorkspace = workspaces.find(
+      (workspace) => workspace.slug === workspaceSlug,
+    );
 
-    setSelectedWorkspaceSlug(workspaceSlug);
-    setActiveWorkspaceSlug(workspaceSlug);
+    if (!selectedWorkspace) {
+      setError("The selected workspace is no longer available.");
+      return;
+    }
+
+    setError(null);
+    setSelectedWorkspaceSlug(selectedWorkspace.slug);
+    setActiveWorkspaceContext(
+      selectedWorkspace.slug,
+      selectedWorkspace.role,
+    );
 
     // Existing answers and document lists might belong to the prior workspace.
     // Reload so every visible result is fetched under the newly selected scope.
