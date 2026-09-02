@@ -14,7 +14,7 @@ from app.services.document_access import (
     DocumentAccessLevel,
 )
 from app.services.document_storage import RedactedDocumentStore
-from app.services.redaction import RedactionResult, redact_secrets
+from app.services.redaction import RedactionResult, redact_sensitive_content
 
 IngestionAction = Literal["created", "updated", "unchanged"]
 
@@ -110,7 +110,7 @@ def ingest_document(
     if access_level is not None and access_level not in ALL_DOCUMENT_ACCESS_LEVELS:
         raise ValueError("Document access level is not supported")
     # Redact before hashing, storing, chunking, embedding, or retrieving document content.
-    redaction_result = redact_secrets(content)
+    redaction_result = redact_sensitive_content(content)
     safe_content = redaction_result.content
     content_hash = calculate_content_sha256(safe_content)
 

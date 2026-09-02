@@ -160,6 +160,51 @@ def test_ingest_document_mirrors_only_redacted_content_when_store_is_configured(
     }
 
 
+def test_ingest_document_redacts_pii_before_database_and_s3_storage() -> None:
+    """PII must be redacted before either durable storage destination receives text."""
+    session = Mock()
+    session.scalar.return_value = None
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    document_store = FakeRedactedDocumentStore()
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="uploads/pii-verification.md",
+        content=(
+            "On-call email: shruti@example.com\n"
+            "Mobile: +91 98765 43210\n"
+            "Inspect Redis eviction policy."
+        ),
+        ingestion_source="api-upload",
+        content_type="text/markdown",
+        document_store=document_store,
+    )
+
+    stored_document = session.add.call_args.args[0]
+    expected_safe_content = (
+        "On-call email: [REDACTED: EMAIL_ADDRESS]\n"
+        "Mobile: [REDACTED: PHONE_NUMBER]\n"
+        "Inspect Redis eviction policy."
+    )
+
+    assert result.action == "created"
+    assert stored_document.content == expected_safe_content
+    assert document_store.calls[0]["redacted_content"] == expected_safe_content
+    assert "shruti@example.com" not in stored_document.content
+    assert "+91 98765 43210" not in stored_document.content
+    assert stored_document.document_metadata["redaction"] == {
+        "applied": True,
+        "count": 2,
+        "types": ["EMAIL_ADDRESS", "PHONE_NUMBER"],
+    }
+
+
 def test_ingest_document_does_not_change_database_when_storage_mirror_fails() -> None:
     """A configured durable-storage failure must prevent a partial ingestion write."""
     session = Mock()
