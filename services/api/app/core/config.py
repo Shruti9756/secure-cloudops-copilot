@@ -36,7 +36,8 @@ class Settings(BaseSettings):
     ask_rate_limit_requests: int = 10
     ask_rate_limit_window_seconds: int = 60
     # Local worker scope; production will derive this from authenticated job data.
-    document_processor_tenant_slug: str = "nimbuscart"
+    # None means the worker processes pending work across all tenant workspaces.
+    document_processor_tenant_slug: str | None = None
     document_processor_poll_interval_seconds: int = Field(
         default=5,
         ge=1,
