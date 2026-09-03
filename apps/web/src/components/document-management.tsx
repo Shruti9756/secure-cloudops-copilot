@@ -1,10 +1,17 @@
 "use client";
 
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useEffect,
+  useState,
+} from "react";
+
 import {
   getApiAuthorizationHeaders,
   getApiWorkspaceHeaders,
   getActiveWorkspaceRole,
+  type WorkspaceRole,
 } from "@/lib/cognito-auth";
 
 const API_BASE_URL =
@@ -79,8 +86,25 @@ function isSupportedDocumentFile(file: File): boolean {
   );
 }
 
+
 export function DocumentManagement() {
-  const activeWorkspaceRole = getActiveWorkspaceRole();
+  const [activeWorkspaceRole, setActiveWorkspaceRole] =
+    useState<WorkspaceRole | null>(null);
+
+  useEffect(() => {
+    const refreshActiveWorkspaceRole = () => {
+      setActiveWorkspaceRole(getActiveWorkspaceRole());
+    };
+
+    const timeoutId = window.setTimeout(refreshActiveWorkspaceRole, 0);
+    window.addEventListener("storage", refreshActiveWorkspaceRole);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("storage", refreshActiveWorkspaceRole);
+    };
+  }, []);
+
   const canUploadDocuments =
     activeWorkspaceRole === "admin" || activeWorkspaceRole === "manager";
   const [documents, setDocuments] = useState<DocumentStatusItem[]>([]);
