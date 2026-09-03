@@ -5,6 +5,8 @@ const ACTIVE_WORKSPACE_STORAGE_KEY =
   "securecloudops.active-workspace-slug";
 const ACTIVE_WORKSPACE_ROLE_STORAGE_KEY =
   "securecloudops.active-workspace-role";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 export type WorkspaceRole = "admin" | "manager" | "engineer";
 
@@ -174,6 +176,21 @@ export function getApiWorkspaceHeaders(): Record<string, string> {
     : {};
 }
 
+async function recordAuthenticatedApiSession(
+  accessToken: string,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/identity/session`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("SecureCloudOps could not confirm the signed-in session.");
+  }
+}
+
 export async function beginCognitoSignIn(): Promise<void> {
   const configuration = getCognitoConfiguration();
   const state = createRandomBase64Url(32);
@@ -198,6 +215,8 @@ export async function beginCognitoSignIn(): Promise<void> {
 
   window.location.assign(authorizationUrl.toString());
 }
+
+
 
 export async function completeCognitoSignIn(
   authorizationCode: string,
@@ -264,6 +283,14 @@ export async function completeCognitoSignIn(
 
   window.sessionStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
   window.sessionStorage.removeItem(ACTIVE_WORKSPACE_ROLE_STORAGE_KEY);
-  window.sessionStorage.removeItem(COGNITO_STATE_STORAGE_KEY);
-  window.sessionStorage.removeItem(COGNITO_VERIFIER_STORAGE_KEY);
+
+  try {
+    await recordAuthenticatedApiSession(payload.access_token);
+  } catch {
+    window.sessionStorage.removeItem(COGNITO_SESSION_STORAGE_KEY);
+    throw new Error("SecureCloudOps could not confirm the signed-in session.");
+  } finally {
+    window.sessionStorage.removeItem(COGNITO_STATE_STORAGE_KEY);
+    window.sessionStorage.removeItem(COGNITO_VERIFIER_STORAGE_KEY);
+  }
 }

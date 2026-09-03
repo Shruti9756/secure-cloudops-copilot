@@ -71,3 +71,38 @@ def test_workspace_endpoint_returns_an_empty_list_for_a_user_without_memberships
 
     assert response.status_code == 200
     assert response.json() == {"workspaces": []}
+
+
+def test_authenticated_session_endpoint_records_safe_cognito_audit_event() -> None:
+    """A verified Cognito session creates an audit record without token data."""
+    principal = AuthenticatedPrincipal(
+        user_id=uuid4(),
+        identity_subject="cognito-session-test-user",
+        display_name="Cognito Session Test User",
+        authentication_source="cognito",
+    )
+    session = Mock()
+
+    app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_current_principal] = lambda: principal
+
+    try:
+        response = client.post("/api/v1/identity/session")
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_event = session.add.call_args.args[0]
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "authenticated"}
+    assert audit_event.tenant_id is None
+    assert audit_event.organization_id is None
+    assert audit_event.event_type == "identity.api_session_started"
+    assert audit_event.outcome == "succeeded"
+    assert audit_event.actor_type == "cognito_user"
+    assert audit_event.actor_id == "cognito-session-test-user"
+    assert audit_event.request_id == response.headers["x-request-id"]
+    assert audit_event.event_metadata == {
+        "authentication_status": "access_token_accepted",
+    }
+    session.commit.assert_called_once_with()

@@ -200,6 +200,12 @@ class DocumentStatusListResponse(BaseModel):
     documents: list[DocumentStatusItemResponse]
 
 
+class AuthenticatedSessionResponse(BaseModel):
+    """Safe confirmation that the API accepted a verified browser session."""
+
+    status: Literal["authenticated"]
+
+
 class WorkspaceItemResponse(BaseModel):
     """One workspace that the verified user may select in the browser."""
 
@@ -795,6 +801,36 @@ def list_accessible_workspaces(
     ]
 
     return WorkspaceListResponse(workspaces=workspaces)
+
+
+@app.post(
+    "/api/v1/identity/session",
+    response_model=AuthenticatedSessionResponse,
+    tags=["identity"],
+)
+def record_authenticated_session(
+    http_request: Request,
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+) -> AuthenticatedSessionResponse:
+    """Record that the API accepted a verified identity without storing a token."""
+    actor_type, actor_id = get_audit_actor(principal)
+
+    record_audit_event(
+        session,
+        tenant=None,
+        event_type="identity.api_session_started",
+        outcome="succeeded",
+        actor_type=actor_type,
+        actor_id=actor_id,
+        request_id=http_request.state.request_id,
+        metadata={
+            "authentication_status": "access_token_accepted",
+        },
+    )
+    session.commit()
+
+    return AuthenticatedSessionResponse(status="authenticated")
 
 
 @app.post(
