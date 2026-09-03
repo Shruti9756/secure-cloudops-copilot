@@ -135,6 +135,8 @@ def make_grounded_answer() -> GroundedAnswer:
         prompt_token_count=50,
         completion_token_count=20,
         sources=(make_source(),),
+        structured_output_validation_passed=True,
+        structured_output_validation_errors=(),
         citation_validation=CitationValidationResult(
             is_valid=True,
             cited_source_identifiers=("deployments/checkout-2.4.0.md#chunk-0",),
@@ -188,6 +190,8 @@ def test_ask_endpoint_returns_a_grounded_server_scoped_response(
                 "cosine_distance": 0.12,
             }
         ],
+        "structured_output_validation_passed": True,
+        "structured_output_validation_errors": [],
         "citation_validation_passed": True,
         "citation_validation_errors": [],
         "safety_validation_passed": True,
@@ -339,6 +343,52 @@ def test_ask_endpoint_returns_insufficient_evidence_without_a_chat_model(
     assert response.json()["citation_validation_passed"] is None
     assert response.json()["safety_validation_passed"] is None
     # Uncertain responses are deliberately never cached.
+    assert cache.entries == {}
+
+
+def test_ask_endpoint_returns_safe_status_for_invalid_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache()
+
+    def fake_answer_grounded_question(**kwargs: object) -> GroundedAnswer:
+        return GroundedAnswer(
+            answer_text="The generated answer did not match the required schema.",
+            embedding_model="test-embedding-model-v1",
+            generation_model="test-chat-model-v1",
+            query_input_token_count=8,
+            prompt_token_count=40,
+            completion_token_count=12,
+            sources=(make_source(),),
+            citation_validation=None,
+            safety_validation=None,
+            structured_output_validation_passed=False,
+            structured_output_validation_errors=(
+                "The generated response did not match the required answer schema",
+            ),
+        )
+
+    install_fake_dependencies(redis_cache=cache)
+    monkeypatch.setattr("app.main.answer_grounded_question", fake_answer_grounded_question)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={
+                "question": "Why did checkout latency increase?",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "structured_output_validation_failed"
+    assert response.json()["structured_output_validation_passed"] is False
+    assert response.json()["structured_output_validation_errors"] == [
+        "The generated response did not match the required answer schema"
+    ]
+    assert response.json()["citation_validation_passed"] is None
+    assert response.json()["safety_validation_passed"] is None
     assert cache.entries == {}
 
 

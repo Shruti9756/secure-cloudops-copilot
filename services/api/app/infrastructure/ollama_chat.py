@@ -31,26 +31,32 @@ class OllamaChatClient:
         # Tests inject a fake HTTP function; production uses Python's HTTP client.
         self._post_json = post_json or _post_json
 
-    def chat(self, messages: Sequence[ChatMessage]) -> ChatCompletion:
+    def chat(
+        self,
+        messages: Sequence[ChatMessage],
+        response_format: JsonObject | None = None,
+    ) -> ChatCompletion:
         """Send validated, ordered chat messages and return one complete response."""
         serialized_messages = _serialize_messages(messages)
 
+        request_payload: JsonObject = {
+            "model": OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
+            "messages": serialized_messages,
+            "stream": False,
+            "think": False,
+            "keep_alive": "5m",
+            "options": {
+                "temperature": 0,
+                "num_predict": OLLAMA_MAX_GENERATION_TOKENS,
+            },
+        }
+
+        if response_format is not None:
+            request_payload["format"] = response_format
+
         response_payload = self._post_json(
             f"{self._settings.ollama_base_url.rstrip('/')}/api/chat",
-            {
-                "model": OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
-                "messages": serialized_messages,
-                # One complete response is easier to validate than streamed fragments.
-                "stream": False,
-                # RAG answers need final conclusions, not a long internal reasoning trace.
-                "think": False,
-                "keep_alive": "5m",
-                "options": {
-                    "temperature": 0.2,
-                    # A concise incident answer is sufficient and faster on a CPU.
-                    "num_predict": OLLAMA_MAX_GENERATION_TOKENS,
-                },
-            },
+            request_payload,
         )
 
         return _parse_chat_completion(response_payload)

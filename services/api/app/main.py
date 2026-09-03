@@ -151,6 +151,7 @@ class AskResponse(BaseModel):
     status: Literal[
         "grounded",
         "insufficient_evidence",
+        "structured_output_validation_failed",
         "citation_validation_failed",
         "safety_validation_failed",
     ]
@@ -159,6 +160,8 @@ class AskResponse(BaseModel):
     embedding_model: str
     generation_model: str | None
     sources: list[RetrievedSourceResponse]
+    structured_output_validation_passed: bool | None
+    structured_output_validation_errors: list[str]
     citation_validation_passed: bool | None
     citation_validation_errors: list[str]
     safety_validation_passed: bool | None
@@ -525,12 +528,16 @@ def get_answer_status(
 ) -> Literal[
     "grounded",
     "insufficient_evidence",
+    "structured_output_validation_failed",
     "citation_validation_failed",
     "safety_validation_failed",
 ]:
     """Map internal RAG outcomes to a stable, client-safe API status."""
     if not answer.sources:
         return "insufficient_evidence"
+
+    if answer.structured_output_validation_passed is False:
+        return "structured_output_validation_failed"
 
     if answer.citation_validation is not None and not answer.citation_validation.is_valid:
         return "citation_validation_failed"
@@ -565,6 +572,8 @@ def build_ask_response(
             )
             for source in answer.sources
         ],
+        structured_output_validation_passed=answer.structured_output_validation_passed,
+        structured_output_validation_errors=list(answer.structured_output_validation_errors),
         citation_validation_passed=(
             citation_validation.is_valid if citation_validation is not None else None
         ),
@@ -1447,7 +1456,12 @@ def ask_question(
 
     audit_outcome: AuditOutcome = (
         "denied"
-        if ask_response.status in {"citation_validation_failed", "safety_validation_failed"}
+        if ask_response.status
+        in {
+            "structured_output_validation_failed",
+            "citation_validation_failed",
+            "safety_validation_failed",
+        }
         else "succeeded"
     )
 
