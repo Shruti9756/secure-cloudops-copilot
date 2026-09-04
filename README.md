@@ -10,7 +10,7 @@ Teams can upload synthetic runbooks, deployment records, Markdown, TXT, digital 
 
 [V0.1.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.1.0) is released.
 
-The project is currently completing V0.2: **multi-tenant secure RAG**. V0.2 adds Cognito authentication, organization and workspace isolation, role-based access control, document visibility levels, safer audit events, PII redaction, and authorized S3 document downloads.
+V0.2 is the current release candidate: **multi-tenant secure RAG**. It adds Cognito authentication, organization and workspace isolation, role-based access control, document visibility levels, safer audit events, PII redaction, authorized S3 document downloads, and strict structured model-output validation.
 
 ## What works today
 
@@ -20,6 +20,7 @@ The project is currently completing V0.2: **multi-tenant secure RAG**. V0.2 adds
 - Redis response caching and request rate limiting
 - Local Ollama embeddings (mxbai-embed-large) and generation (qwen3:4b-instruct)
 - Cited RAG answers with relevance thresholds and safe insufficient-evidence responses
+- Strict Pydantic structured-output validation for answer shape and citations before a model response is shown
 - Citation validation and deterministic output-safety validation
 - Prompt-injection detection for user questions and suspicious retrieved evidence
 - Secret and narrow PII redaction before storage, chunking, embedding, retrieval, logs, and optional S3 storage
@@ -202,7 +203,7 @@ terraform fmt -check
 terraform validate
 ~~~
 
-The latest local API suite completed with **222 passed, 1 deselected**. The live Docker/Ollama end-to-end test remains opt-in because local generation performance depends on the host machine.
+The latest local API suite completed with **232 passed, 1 deselected**. The live Docker/Ollama end-to-end test remains opt-in because local generation performance depends on the host machine.
 
 ## Security boundaries and current limitations
 
@@ -217,5 +218,7 @@ The latest local API suite completed with **222 passed, 1 deselected**. The live
 
 - [V0.1 release checklist](docs/release/v0.1-release-checklist.md)
 - [V0.1 demo script](docs/demo/v0.1-demo-script.md)
+- [V0.2 release checklist](docs/release/v0.2-release-checklist.md)
+- [V0.2 demo script](docs/demo/v0.2-demo-script.md)
 - [Security threat model](docs/security/threat-model-v1.md)
 - [Versioned roadmap](VERSIONED_ROADMAP.md)

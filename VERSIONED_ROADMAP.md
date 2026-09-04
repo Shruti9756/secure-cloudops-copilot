@@ -181,25 +181,25 @@
 
 ## Build
 
-- [ ] Add `Organization`, `User`, `Membership`, and `Role` entities.
-- [ ] Add roles: `admin`, `manager`, `engineer`.
-- [ ] Add `organization_id` to every tenant-owned row, chunk, embedding, conversation, document, and audit event.
-- [ ] Require organization context in all API requests.
-- [ ] Enforce organization and role filtering before vector retrieval.
-- [ ] Add document access-level metadata and queries.
-- [ ] Add Amazon Cognito authentication and JWT validation.
-- [ ] Add organization-aware frontend navigation and admin/document views.
-- [ ] Add presigned S3 upload/download URLs where appropriate.
-- [ ] Expand audit events to record log-in, document operations, chats, citations, denied access, and quota decisions.
-- [ ] Add tests proving Organization A cannot infer, retrieve, cite, or access data from Organization B.
+- [x] Add `Organization`, `User`, `Membership`, and `Role` entities.
+- [x] Add roles: `admin`, `manager`, `engineer`.
+- [x] Add `organization_id` to implemented tenant-owned document, chunk, retrieval, cache, and audit records.
+- [x] Require authorized organization context in protected API requests.
+- [x] Enforce organization and role filtering before vector retrieval.
+- [x] Add document access-level metadata and queries.
+- [x] Add Amazon Cognito authentication and JWT validation.
+- [x] Add organization-aware frontend navigation and document views.
+- [x] Add version-pinned presigned S3 download URLs where appropriate; uploads remain API-mediated so redaction happens before storage.
+- [x] Expand audit events to record authenticated sessions, document operations, RAG outcomes, denied access, and quota decisions.
+- [x] Add tests proving Organization A cannot infer, retrieve, cite, or access data from Organization B.
 
 ## AI safety foundation
 
-- [ ] Separate system instruction, user input, and retrieved text by clear delimiters/trust labels.
-- [ ] Treat uploaded documents as untrusted input.
-- [ ] Add basic prompt-injection detection/flagging for user input and document chunks.
-- [ ] Add PII/secret redaction before logs and model calls where appropriate.
-- [ ] Use strict structured output validation for citations and answer shape.
+- [x] Separate system instruction, user input, and retrieved text by clear delimiters/trust labels.
+- [x] Treat uploaded documents as untrusted input.
+- [x] Add basic prompt-injection detection/flagging for user input and document chunks.
+- [x] Add PII/secret redaction before logs and model calls where appropriate.
+- [x] Use strict structured output validation for citations and answer shape.
 
 ## Technologies introduced
 
@@ -211,8 +211,14 @@
 
 ## Release gate
 
-- [ ] Separate organizations can use the system without cross-tenant data exposure.
-- [ ] Unauthorized questions and retrievals are denied and audited.
+- [x] Separate organizations can use the system without cross-tenant data exposure in the verified local baseline.
+- [x] Unauthorized questions and retrievals are denied and audited.
+
+## Completion evidence
+
+- [x] V0.2 release evidence is captured in `docs/release/screenshots/v0.2/`.
+- [ ] Merge the V0.2 release pull request to `main`.
+- [ ] Create annotated Git tag `v0.2.0` and publish the matching GitHub Release.
 - [ ] Prompt-injection and PII tests exist and pass.
 
 ---
@@ -542,10 +548,10 @@ This is the authoritative inventory of every planned technology and where it wil
 | PDF/DOCX parsing: PyMuPDF, `python-docx` | V0.1 | [ ] |
 | Custom RAG: chunking, embeddings, retrieval, prompts, citations | V0.1 | [ ] |
 | Amazon Bedrock and `boto3` | V0.1 onward | [ ] |
-| Amazon S3 and presigned URLs | V0.1, V0.2, V0.4 | [ ] |
-| RAG tenant filters and RBAC | V0.2 | [ ] |
-| Amazon Cognito, JWT | V0.2 | [ ] |
-| AI safety: injection defense, output validation, PII redaction | V0.2, V0.6 | [ ] |
+| Amazon S3 and presigned URLs | V0.1, V0.2, V0.4 | [x] V0.1/V0.2 local baseline |
+| RAG tenant filters and RBAC | V0.2 | [x] |
+| Amazon Cognito, JWT | V0.2 | [x] |
+| AI safety: injection defense, output validation, PII redaction | V0.2, V0.6 | [x] V0.2 baseline; V0.6 hardening remains |
 | Bedrock Guardrails | V0.2, V0.6 | [ ] |
 | Async processing, retries, idempotency | V0.3 | [ ] |
 | Hybrid search, BM25, `rank-bm25`, reranking | V0.3 | [ ] |
