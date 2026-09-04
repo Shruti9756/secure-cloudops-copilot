@@ -217,8 +217,8 @@
 ## Completion evidence
 
 - [x] V0.2 release evidence is captured in `docs/release/screenshots/v0.2/`.
-- [ ] Merge the V0.2 release pull request to `main`.
-- [ ] Create annotated Git tag `v0.2.0` and publish the matching GitHub Release.
+- [x] Merged V0.2 release pull request #2 to `main` after eight required GitHub Actions checks passed.
+- [x] Created annotated Git tag `v0.2.0` and published the matching GitHub Release.
 - [ ] Prompt-injection and PII tests exist and pass.
 
 ---
