@@ -2,13 +2,14 @@
 
 import hashlib
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Protocol
 
 from redis.exceptions import RedisError
 
 # Bump this version when the answer pipeline changes in a cache-incompatible way.
-ASK_RESPONSE_CACHE_KEY_VERSION = "v1"
+ASK_RESPONSE_CACHE_KEY_VERSION = "v2"
 
 # Short TTL limits how long an answer can remain stale after knowledge changes.
 ASK_RESPONSE_CACHE_TTL_SECONDS = 300
@@ -40,16 +41,25 @@ def normalize_question(question: str) -> str:
 def build_ask_response_cache_key(
     *,
     tenant_slug: str,
+    document_access_levels: Collection[str],
     question: str,
     limit: int,
 ) -> str:
     """Build a tenant-safe cache key without exposing the raw user question."""
     normalized_question = normalize_question(question)
+    normalized_document_access_levels = tuple(sorted(set(document_access_levels)))
+
+    if not normalized_document_access_levels:
+        raise ValueError("At least one document access level is required")
+
+    access_scope_digest = hashlib.sha256(
+        "\x1f".join(normalized_document_access_levels).encode("utf-8")
+    ).hexdigest()
     question_digest = hashlib.sha256(normalized_question.encode("utf-8")).hexdigest()
 
     return (
         f"securecloudops:ask:{ASK_RESPONSE_CACHE_KEY_VERSION}:"
-        f"{tenant_slug}:{limit}:{question_digest}"
+        f"{tenant_slug}:{access_scope_digest}:{limit}:{question_digest}"
     )
 
 

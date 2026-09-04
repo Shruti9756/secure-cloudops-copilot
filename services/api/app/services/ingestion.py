@@ -6,10 +6,15 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import KnowledgeDocument, Tenant
+from app.db.models import KnowledgeDocument, Organization, Tenant
 from app.infrastructure.s3 import S3DocumentReference
+from app.services.document_access import (
+    ALL_DOCUMENT_ACCESS_LEVELS,
+    ORGANIZATION_DOCUMENT_ACCESS,
+    DocumentAccessLevel,
+)
 from app.services.document_storage import RedactedDocumentStore
-from app.services.redaction import RedactionResult, redact_secrets
+from app.services.redaction import RedactionResult, redact_sensitive_content
 
 IngestionAction = Literal["created", "updated", "unchanged"]
 
@@ -65,11 +70,26 @@ def _document_metadata_for(
     return metadata
 
 
+def get_or_create_organization(session: Session, slug: str, name: str) -> Organization:
+    """Create the local demo organization once, or return its existing record."""
+    organization = session.scalar(select(Organization).where(Organization.slug == slug))
+
+    if organization is None:
+        organization = Organization(slug=slug, name=name)
+        session.add(organization)
+        session.flush()
+
+    return organization
+
+
 def get_or_create_tenant(session: Session, slug: str, name: str) -> Tenant:
+    """Create a tenant workspace that is always owned by an organization."""
     tenant = session.scalar(select(Tenant).where(Tenant.slug == slug))
 
     if tenant is None:
-        tenant = Tenant(slug=slug, name=name)
+        # V0.2 keeps the V0.1 demo simple: NimbusCart owns its nimbuscart workspace.
+        organization = get_or_create_organization(session, slug, name)
+        tenant = Tenant(slug=slug, name=name, organization=organization)
         session.add(tenant)
         session.flush()
 
@@ -81,13 +101,16 @@ def ingest_document(
     tenant: Tenant,
     source_path: str,
     content: str,
+    access_level: DocumentAccessLevel | None = None,
     ingestion_source: str = "local-demo-data",
     content_type: str = "text/markdown",
     document_store: RedactedDocumentStore | None = None,
 ) -> IngestionResult:
     """Redact, optionally mirror, and persist one tenant-scoped knowledge document."""
+    if access_level is not None and access_level not in ALL_DOCUMENT_ACCESS_LEVELS:
+        raise ValueError("Document access level is not supported")
     # Redact before hashing, storing, chunking, embedding, or retrieving document content.
-    redaction_result = redact_secrets(content)
+    redaction_result = redact_sensitive_content(content)
     safe_content = redaction_result.content
     content_hash = calculate_content_sha256(safe_content)
 
@@ -97,9 +120,14 @@ def ingest_document(
     )
     document = session.scalar(statement)
 
-    # Identical source content needs neither new database writes nor a new S3 version.
+    # Identical content normally needs no write or new S3 version. An explicit
+    # visibility change is still a meaningful metadata update.
     if document is not None and document.source_sha256 == content_hash:
-        return IngestionResult(action="unchanged", source_path=source_path)
+        if access_level is None or document.access_level == access_level:
+            return IngestionResult(action="unchanged", source_path=source_path)
+
+        document.access_level = access_level
+        return IngestionResult(action="updated", source_path=source_path)
 
     storage_reference: S3DocumentReference | None = None
 
@@ -121,15 +149,17 @@ def ingest_document(
 
     if document is None:
         fallback_title = Path(source_path).stem.replace("-", " ").replace("_", " ").title()
-
+        resolved_access_level = access_level or ORGANIZATION_DOCUMENT_ACCESS
         session.add(
             KnowledgeDocument(
                 tenant_id=tenant.id,
+                organization_id=tenant.organization_id,
                 title=extract_markdown_title(safe_content, fallback_title),
                 source_path=source_path,
                 source_sha256=content_hash,
                 content=safe_content,
                 ingestion_status="pending",
+                access_level=resolved_access_level,
                 document_metadata=document_metadata,
             )
         )
@@ -137,6 +167,8 @@ def ingest_document(
         return IngestionResult(action="created", source_path=source_path)
 
     fallback_title = Path(source_path).stem.replace("-", " ").replace("_", " ").title()
+    if access_level is not None:
+        document.access_level = access_level
     document.title = extract_markdown_title(safe_content, fallback_title)
     document.source_sha256 = content_hash
     document.content = safe_content

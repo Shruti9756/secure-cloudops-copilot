@@ -1,6 +1,10 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import {
+  getApiAuthorizationHeaders,
+  getApiWorkspaceHeaders,
+} from "@/lib/cognito-auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -11,6 +15,7 @@ const DEFAULT_QUESTION =
 type AnswerStatus =
   | "grounded"
   | "insufficient_evidence"
+  | "structured_output_validation_failed"
   | "citation_validation_failed"
   | "safety_validation_failed";
 
@@ -27,6 +32,8 @@ type AskApiResponse = {
   embedding_model: string;
   generation_model: string | null;
   sources: RetrievedSource[];
+  structured_output_validation_passed: boolean | null;
+  structured_output_validation_errors: string[];
   citation_validation_passed: boolean | null;
   citation_validation_errors: string[];
   safety_validation_passed: boolean | null;
@@ -60,6 +67,9 @@ function getStatusLabel(status: AnswerStatus): string {
 
   if (status === "insufficient_evidence") {
     return "Insufficient evidence";
+  }
+  if (status === "structured_output_validation_failed") {
+    return "Model output withheld";
   }
 
   return "Answer withheld";
@@ -177,6 +187,8 @@ export function AskCopilot() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
         },
         // The browser can submit only the question and a safe retrieval limit.
         // Tenant selection and all RAG security decisions remain on the API.
@@ -312,7 +324,32 @@ export function AskCopilot() {
               {answer.answer}
             </p>
           </div>
+          {answer.structured_output_validation_passed !== null ? (
+            <p className="text-xs text-slate-400">
+              Structured output validation:{" "}
+              <span
+                className={
+                  answer.structured_output_validation_passed
+                    ? "text-emerald-300"
+                    : "text-rose-300"
+                }
+              >
+                {answer.structured_output_validation_passed
+                  ? "passed"
+                  : "failed"}
+              </span>
+            </p>
+          ) : null}
 
+          {answer.structured_output_validation_errors.length > 0 ? (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-rose-200">
+              {answer.structured_output_validation_errors.map(
+                (validationError) => (
+                  <li key={validationError}>{validationError}</li>
+                ),
+              )}
+            </ul>
+          ) : null}
           {answer.citation_validation_passed !== null ? (
             <p className="text-xs text-slate-400">
               Citation validation:{" "}

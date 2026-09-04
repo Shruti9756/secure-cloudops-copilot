@@ -14,6 +14,7 @@ type RAGRequestStatus = Literal[
     "citation_validation_failed",
     "safety_validation_failed",
     "invalid_question",
+    "prompt_injection_detected",
     "rate_limited",
     "rate_limit_unavailable",
     "model_provider_unavailable",

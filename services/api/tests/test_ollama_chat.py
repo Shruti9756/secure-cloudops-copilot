@@ -75,12 +75,42 @@ def test_chat_posts_valid_messages_and_returns_completion() -> None:
                 "think": False,
                 "keep_alive": "5m",
                 "options": {
-                    "temperature": 0.2,
+                    "temperature": 0,
                     "num_predict": 64,
                 },
             },
         )
     ]
+
+
+def test_chat_forwards_a_requested_json_schema() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    response_format = {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+        },
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+
+    def fake_post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append((url, payload))
+        return make_valid_response()
+
+    client = OllamaChatClient(
+        settings=make_settings(),
+        post_json=fake_post_json,
+    )
+
+    client.chat(
+        [
+            ChatMessage(role="user", content="Return JSON."),
+        ],
+        response_format=response_format,
+    )
+
+    assert calls[0][1]["format"] == response_format
 
 
 def test_chat_rejects_empty_messages_without_an_http_request() -> None:

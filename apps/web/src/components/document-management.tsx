@@ -1,6 +1,18 @@
 "use client";
 
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  getApiAuthorizationHeaders,
+  getApiWorkspaceHeaders,
+  getActiveWorkspaceRole,
+  type WorkspaceRole,
+} from "@/lib/cognito-auth";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -8,6 +20,7 @@ const API_BASE_URL =
 const MAX_DOCUMENT_UPLOAD_BYTES = 1_000_000;
 
 type DocumentIngestionStatus = "pending" | "chunked" | "embedded";
+type DocumentAccessLevel = "organization" | "restricted";
 
 type DocumentStatusItem = {
   source_path: string;
@@ -25,6 +38,12 @@ type DocumentUploadResponse = {
   action: "created" | "updated" | "unchanged";
   tenant: string;
   source_path: string;
+};
+
+type DocumentDownloadResponse = {
+  source_path: string;
+  download_url: string;
+  expires_in_seconds: number;
 };
 
 type ErrorResponse = {
@@ -67,15 +86,42 @@ function isSupportedDocumentFile(file: File): boolean {
   );
 }
 
+
 export function DocumentManagement() {
+  const [activeWorkspaceRole, setActiveWorkspaceRole] =
+    useState<WorkspaceRole | null>(null);
+
+  useEffect(() => {
+    const refreshActiveWorkspaceRole = () => {
+      setActiveWorkspaceRole(getActiveWorkspaceRole());
+    };
+
+    const timeoutId = window.setTimeout(refreshActiveWorkspaceRole, 0);
+    window.addEventListener("storage", refreshActiveWorkspaceRole);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("storage", refreshActiveWorkspaceRole);
+    };
+  }, []);
+
+  const canUploadDocuments =
+    activeWorkspaceRole === "admin" || activeWorkspaceRole === "manager";
   const [documents, setDocuments] = useState<DocumentStatusItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedAccessLevel, setSelectedAccessLevel] =
+    useState<DocumentAccessLevel>("organization");
   const [uploadResult, setUploadResult] =
     useState<DocumentUploadResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
+  const [downloadResult, setDownloadResult] =
+    useState<DocumentDownloadResponse | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingSourcePath, setDownloadingSourcePath] =
+    useState<string | null>(null);
   const [hasLoadedDocuments, setHasLoadedDocuments] = useState(false);
 
   async function loadDocumentStatuses() {
@@ -83,7 +129,12 @@ export function DocumentManagement() {
     setStatusError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/documents`);
+      const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
+        headers: {
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
+        },
+      });
       const payload: unknown = await response.json();
 
       if (!response.ok) {
@@ -129,6 +180,13 @@ export function DocumentManagement() {
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!canUploadDocuments) {
+      setUploadError(
+        "Only workspace administrators and managers may upload documents.",
+      );
+      return;
+    }
+
     if (selectedFile === null) {
       setUploadError("Choose a supported document before uploading.");
       return;
@@ -149,6 +207,7 @@ export function DocumentManagement() {
 
     // This must match FastAPI's `uploaded_file: UploadFile` parameter name.
     formData.append("uploaded_file", selectedFile);
+    formData.append("access_level", selectedAccessLevel);
 
     setIsUploading(true);
     setUploadError(null);
@@ -157,6 +216,10 @@ export function DocumentManagement() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
         method: "POST",
+        headers: {
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
+        },
         // Do not set Content-Type: the browser adds the multipart boundary safely.
         body: formData,
       });
@@ -168,6 +231,7 @@ export function DocumentManagement() {
 
       setUploadResult(payload as DocumentUploadResponse);
       setSelectedFile(null);
+      setSelectedAccessLevel("organization");
       form.reset();
 
       // Show the newly accepted document and its initial pending status.
@@ -180,6 +244,42 @@ export function DocumentManagement() {
       );
     } finally {
       setIsUploading(false);
+    }
+  }
+  async function prepareDocumentDownload(sourcePath: string) {
+    setDownloadingSourcePath(sourcePath);
+    setDownloadError(null);
+    setDownloadResult(null);
+
+    try {
+      const requestUrl = new URL(
+        "/api/v1/documents/download",
+        API_BASE_URL,
+      );
+      requestUrl.searchParams.set("source_path", sourcePath);
+
+      const response = await fetch(requestUrl, {
+        headers: {
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
+        },
+      });
+      const payload: unknown = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(payload));
+      }
+
+      // Keep the temporary URL only in this component's memory.
+      setDownloadResult(payload as DocumentDownloadResponse);
+    } catch (caughtError) {
+      setDownloadError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to prepare the document download. Please try again.",
+      );
+    } finally {
+      setDownloadingSourcePath(null);
     }
   }
 
@@ -206,7 +306,16 @@ text, validates it, and redacts secrets before storage.
           {isLoadingDocuments ? "Refreshing..." : "Refresh statuses"}
         </button>
       </div>
-
+      {!canUploadDocuments ? (
+        <p
+          className="mt-5 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100"
+          role="status"
+        >
+          {activeWorkspaceRole === "engineer"
+            ? "Engineers can read organization documents but cannot upload or update them. Ask a manager or administrator to make document changes."
+            : "Choose a workspace to load your document permissions."}
+        </p>
+      ) : null}
       <form className="mt-5 space-y-3" onSubmit={handleUpload}>
         <label
           className="block text-sm font-medium text-slate-300"
@@ -218,12 +327,39 @@ text, validates it, and redacts secrets before storage.
         <input
           accept=".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           className="block w-full cursor-pointer rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300 file:mr-4 file:rounded-md file:border-0 file:bg-cyan-400 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-950 hover:file:bg-cyan-300"
-          disabled={isUploading}
+          disabled={isUploading || !canUploadDocuments}
           id="knowledge-file"
           onChange={handleFileChange}
           type="file"
         />
+        <div>
+          <label
+            className="block text-sm font-medium text-slate-300"
+            htmlFor="document-access-level"
+          >
+            Document visibility
+          </label>
 
+          <select
+            className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+            disabled={isUploading || !canUploadDocuments}
+            id="document-access-level"
+            onChange={(event) =>
+              setSelectedAccessLevel(
+                event.target.value as DocumentAccessLevel,
+              )
+            }
+            value={selectedAccessLevel}
+          >
+            <option value="organization">Organization</option>
+            <option value="restricted">Restricted</option>
+          </select>
+
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Organization is visible to authorized engineers. Restricted is visible
+            only to managers and administrators.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-slate-500">
             Accepted: .md, .txt, .pdf, and .docx · Maximum size: 1 MB
@@ -231,7 +367,7 @@ text, validates it, and redacts secrets before storage.
 
           <button
             className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-            disabled={isUploading || selectedFile === null}
+            disabled={isUploading || selectedFile === null || !canUploadDocuments}
             type="submit"
           >
             {isUploading ? "Uploading..." : "Upload document"}
@@ -253,8 +389,8 @@ text, validates it, and redacts secrets before storage.
           className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-200"
           role="status"
         >
-          Upload {uploadResult.action}: {uploadResult.source_path}. Processing
-          status starts as pending.
+          Upload {uploadResult.action}: {uploadResult.source_path}. Current processing
+          status is shown below.
         </p>
       ) : null}
 
@@ -265,6 +401,34 @@ text, validates it, and redacts secrets before storage.
         >
           Unable to load document statuses: {statusError}
         </p>
+      ) : null}
+
+            {downloadError ? (
+        <p
+          className="mt-4 rounded-lg border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200"
+          role="alert"
+        >
+          Unable to prepare document download: {downloadError}
+        </p>
+      ) : null}
+
+      {downloadResult ? (
+        <div className="mt-4 rounded-lg border border-cyan-400/30 bg-cyan-400/10 p-3 text-sm text-cyan-100">
+          <p>
+            A temporary redacted-document link is ready for{" "}
+            <span className="font-semibold">{downloadResult.source_path}</span>.
+            It expires in {downloadResult.expires_in_seconds} seconds.
+          </p>
+
+          <a
+            className="mt-3 inline-flex rounded-lg border border-cyan-300/50 px-3 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-400/10"
+            href={downloadResult.download_url}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Open redacted document
+          </a>
+        </div>
       ) : null}
 
       <div className="mt-5">
@@ -310,13 +474,28 @@ text, validates it, and redacts secrets before storage.
                     </p>
                   </div>
 
-                  <span
-                    className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusClasses(
-                      document.ingestion_status,
-                    )}`}
-                  >
-                    {document.ingestion_status}
-                  </span>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusClasses(
+                        document.ingestion_status,
+                      )}`}
+                    >
+                      {document.ingestion_status}
+                    </span>
+
+                    <button
+                      className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-300 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600"
+                      disabled={downloadingSourcePath !== null}
+                      onClick={() =>
+                        void prepareDocumentDownload(document.source_path)
+                      }
+                      type="button"
+                    >
+                      {downloadingSourcePath === document.source_path
+                        ? "Preparing..."
+                        : "Get secure link"}
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}

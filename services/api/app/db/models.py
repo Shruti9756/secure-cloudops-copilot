@@ -22,10 +22,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
-class Tenant(Base):
-    __tablename__ = "tenants"
+class Organization(Base):
+    """A company boundary that owns one or more tenant workspaces."""
 
-    # A tenant is the top-level data-isolation boundary for a customer/workspace.
+    __tablename__ = "organizations"
+
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -35,6 +36,106 @@ class Tenant(Base):
         nullable=False,
     )
 
+    # A future organization may have several isolated workspaces.
+    tenants: Mapped[list[Tenant]] = relationship(back_populates="organization")
+
+    # Memberships decide which users may access this organization.
+    memberships: Mapped[list[Membership]] = relationship(
+        back_populates="organization",
+        cascade="all, delete-orphan",
+    )
+
+
+class User(Base):
+    """A future authenticated person identified by an external identity provider."""
+
+    __tablename__ = "users"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+
+    # Cognito's stable `sub` value will be stored here later; do not use email as identity.
+    identity_subject: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+    )
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    memberships: Mapped[list[Membership]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class Membership(Base):
+    """A user's role within exactly one organization."""
+
+    __tablename__ = "memberships"
+    __table_args__ = (
+        # A user may have only one role record in an organization.
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            name="uq_memberships_organization_user",
+        ),
+        # Database-level validation prevents invalid roles even outside the API.
+        CheckConstraint(
+            "role IN ('admin', 'manager', 'engineer')",
+            name="ck_memberships_role",
+        ),
+        # Future login checks commonly begin by finding a user's memberships.
+        Index("ix_memberships_user_id", "user_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="memberships")
+    user: Mapped[User] = relationship(back_populates="memberships")
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+
+    # A tenant is an isolated workspace inside one organization.
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # Authorization will prove a user belongs to this organization before using this tenant.
+    organization: Mapped[Organization] = relationship(back_populates="tenants")
     documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="tenant",
         cascade="all, delete-orphan",
@@ -55,12 +156,23 @@ class KnowledgeDocument(Base):
             "source_path",
             name="uq_knowledge_documents_tenant_source_path",
         ),
+        CheckConstraint(
+            "access_level IN ('organization', 'restricted')",
+            name="ck_knowledge_documents_access_level",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid,
         ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Store direct organization ownership so SQL can enforce both scopes.
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -71,6 +183,11 @@ class KnowledgeDocument(Base):
     ingestion_status: Mapped[str] = mapped_column(
         String(32),
         server_default="pending",
+        nullable=False,
+    )
+    access_level: Mapped[str] = mapped_column(
+        String(32),
+        server_default="organization",
         nullable=False,
     )
     document_metadata: Mapped[dict[str, Any]] = mapped_column(
@@ -107,6 +224,12 @@ class AuditEvent(Base):
     __table_args__ = (
         # The common investigation query is: tenant events ordered by newest first.
         Index("ix_audit_events_tenant_created_at", "tenant_id", "created_at"),
+        # Organization-level investigations should not need to scan every audit event.
+        Index(
+            "ix_audit_events_organization_created_at",
+            "organization_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -117,6 +240,13 @@ class AuditEvent(Base):
         Uuid,
         ForeignKey("tenants.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    # Some events happen before a workspace is known, so organization scope is nullable.
+    organization_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=False,
     )
     event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -165,10 +295,17 @@ class DocumentChunk(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
-    # Tenant ownership is inherited through the document relationship.
+    # The parent document controls a chunk's lifecycle.
     document_id: Mapped[UUID] = mapped_column(
         Uuid,
         ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Chunks contain evidence sent to the model, so keep direct organization scope.
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )

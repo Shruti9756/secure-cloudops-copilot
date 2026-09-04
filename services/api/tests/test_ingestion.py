@@ -5,6 +5,7 @@ import pytest
 
 from app.db.models import KnowledgeDocument, Tenant
 from app.infrastructure.s3 import S3DocumentReference
+from app.services.document_access import RESTRICTED_DOCUMENT_ACCESS
 from app.services.ingestion import (
     calculate_content_sha256,
     extract_markdown_title,
@@ -77,7 +78,7 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
     """The database model must receive safe text and non-sensitive audit metadata."""
     session = Mock()
     session.scalar.return_value = None
-    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart", organization_id=uuid4())
 
     result = ingest_document(
         session=session,
@@ -96,6 +97,8 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
 
     assert result.action == "created"
     assert isinstance(stored_document, KnowledgeDocument)
+    assert stored_document.access_level == "organization"
+    assert stored_document.organization_id == tenant.organization_id
     assert stored_document.title == "Checkout Runbook"
     assert stored_document.content == (
         "# Checkout Runbook\n\n"
@@ -157,6 +160,51 @@ def test_ingest_document_mirrors_only_redacted_content_when_store_is_configured(
     }
 
 
+def test_ingest_document_redacts_pii_before_database_and_s3_storage() -> None:
+    """PII must be redacted before either durable storage destination receives text."""
+    session = Mock()
+    session.scalar.return_value = None
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    document_store = FakeRedactedDocumentStore()
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="uploads/pii-verification.md",
+        content=(
+            "On-call email: shruti@example.com\n"
+            "Mobile: +91 98765 43210\n"
+            "Inspect Redis eviction policy."
+        ),
+        ingestion_source="api-upload",
+        content_type="text/markdown",
+        document_store=document_store,
+    )
+
+    stored_document = session.add.call_args.args[0]
+    expected_safe_content = (
+        "On-call email: [REDACTED: EMAIL_ADDRESS]\n"
+        "Mobile: [REDACTED: PHONE_NUMBER]\n"
+        "Inspect Redis eviction policy."
+    )
+
+    assert result.action == "created"
+    assert stored_document.content == expected_safe_content
+    assert document_store.calls[0]["redacted_content"] == expected_safe_content
+    assert "shruti@example.com" not in stored_document.content
+    assert "+91 98765 43210" not in stored_document.content
+    assert stored_document.document_metadata["redaction"] == {
+        "applied": True,
+        "count": 2,
+        "types": ["EMAIL_ADDRESS", "PHONE_NUMBER"],
+    }
+
+
 def test_ingest_document_does_not_change_database_when_storage_mirror_fails() -> None:
     """A configured durable-storage failure must prevent a partial ingestion write."""
     session = Mock()
@@ -175,4 +223,36 @@ def test_ingest_document_does_not_change_database_when_storage_mirror_fails() ->
             document_store=document_store,
         )
 
+    session.add.assert_not_called()
+
+
+def test_ingest_document_updates_access_level_without_reprocessing_same_content() -> None:
+    """A visibility-only update keeps existing embeddings valid."""
+    session = Mock()
+    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    content = "# Restricted Runbook\n\nInspect the database connection pool."
+
+    existing_document = KnowledgeDocument(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        title="Restricted Runbook",
+        source_path="runbooks/restricted.md",
+        source_sha256=calculate_content_sha256(content),
+        content=content,
+        ingestion_status="embedded",
+        access_level="organization",
+    )
+    session.scalar.return_value = existing_document
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="runbooks/restricted.md",
+        content=content,
+        access_level=RESTRICTED_DOCUMENT_ACCESS,
+    )
+
+    assert result.action == "updated"
+    assert existing_document.access_level == RESTRICTED_DOCUMENT_ACCESS
+    assert existing_document.ingestion_status == "embedded"
     session.add.assert_not_called()

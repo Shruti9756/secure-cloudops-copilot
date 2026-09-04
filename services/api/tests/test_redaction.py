@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.redaction import redact_secrets
+from app.services.redaction import redact_sensitive_content
 
 
 def test_redact_secrets_replaces_common_credential_shapes() -> None:
@@ -10,7 +10,7 @@ def test_redact_secrets_replaces_common_credential_shapes() -> None:
         "Authorization: Bearer example-token-123"
     )
 
-    result = redact_secrets(content)
+    result = redact_sensitive_content(content)
 
     assert result.content == (
         "AWS_ACCESS_KEY_ID=[REDACTED: AWS_ACCESS_KEY_ID]\n"
@@ -28,19 +28,31 @@ def test_redact_secrets_replaces_common_credential_shapes() -> None:
 def test_redact_secrets_preserves_ordinary_document_content() -> None:
     content = "# Checkout Runbook\n\nInspect Redis eviction metrics before making changes."
 
-    result = redact_secrets(content)
+    result = redact_sensitive_content(content)
 
     assert result.content == content
     assert result.redaction_count == 0
     assert result.redaction_types == ()
 
 
+def test_redact_sensitive_content_replaces_narrow_pii_shapes() -> None:
+    content = "On-call email: shruti@example.com\nMobile: +91 98765 43210"
+
+    result = redact_sensitive_content(content)
+
+    assert result.content == (
+        "On-call email: [REDACTED: EMAIL_ADDRESS]\nMobile: [REDACTED: PHONE_NUMBER]"
+    )
+    assert result.redaction_count == 2
+    assert result.redaction_types == ("EMAIL_ADDRESS", "PHONE_NUMBER")
+
+
 def test_redact_secrets_is_idempotent() -> None:
     """Running ingestion again must not repeatedly alter already-safe content."""
-    content = "Authorization: Bearer example-token-123"
+    content = "Email: shruti@example.com\nPhone: +91 98765 43210"
 
-    once = redact_secrets(content)
-    twice = redact_secrets(once.content)
+    once = redact_sensitive_content(content)
+    twice = redact_sensitive_content(once.content)
 
     assert twice.content == once.content
     assert twice.redaction_count == 0
@@ -49,4 +61,4 @@ def test_redact_secrets_is_idempotent() -> None:
 
 def test_redact_secrets_rejects_non_string_content() -> None:
     with pytest.raises(TypeError, match="Content must be a string"):
-        redact_secrets(123)  # type: ignore[arg-type]
+        redact_sensitive_content(123)  # type: ignore[arg-type]

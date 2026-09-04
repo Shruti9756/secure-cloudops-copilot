@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -28,4 +28,8 @@ class ChatProvider(Protocol):
     inheriting from a shared base class.
     """
 
-    def chat(self, messages: Sequence[ChatMessage]) -> ChatCompletion: ...
+    def chat(
+        self,
+        messages: Sequence[ChatMessage],
+        response_format: dict[str, Any] | None = None,
+    ) -> ChatCompletion: ...

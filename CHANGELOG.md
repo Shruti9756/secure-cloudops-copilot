@@ -6,12 +6,47 @@ This project follows semantic versioning. The V0.x releases are learning and por
 
 ## [Unreleased]
 
-### Remaining release requirements
+No unreleased product changes are recorded yet.
 
-- Open and merge the V0.1 pull request to `main`.
-- Create the `v0.1.0` Git tag and GitHub Release.
+## [0.2.0] - Release candidate
 
-## [0.1.0] - Release candidate
+### Identity, authorization, and isolation
+
+- Added organizations, application users, memberships, tenant workspaces, and `admin`, `manager`, and `engineer` roles.
+- Added Cognito Hosted UI authorization-code sign-in with PKCE in the web application.
+- Added server-side Cognito access-token validation for issuer, app client, token use, expiry, signature, and JWKS keys.
+- Added organization-scoped authorization for RAG, document status, upload, download, deployment, and runbook endpoints.
+- Added privacy-preserving cross-workspace denials and safe audit events that correlate the authenticated actor and request ID.
+- Added organization scope to implemented tenant-owned documents, chunks, and audit records, plus organization-scoped retrieval and cache keys.
+- Added role-aware document access levels: engineers read organization documents; managers and administrators also read restricted documents and may upload or update documents.
+
+### AI safety and RAG integrity
+
+- Added prompt-injection handling for untrusted questions and retrieved evidence.
+- Added narrow PII redaction alongside existing secret redaction before persistence, embedding, retrieval, logs, and optional S3 storage.
+- Added strict Pydantic validation for model-produced JSON answer and citation shapes before an answer is returned.
+- Added a safe withheld-response path for malformed structured model output, invalid citations, and unsafe output.
+- Added deterministic generation settings for reproducible local RAG behavior.
+
+### AWS, storage, and user experience
+
+- Added Terraform-managed Amazon Cognito development resources: user pool, web client, managed-login domain, and branding.
+- Added authorized, short-lived, version-pinned S3 links for redacted document text only.
+- Added workspace and role display, Cognito session handling, role-aware document controls, and secure-link controls in the web UI.
+- Added a worker mode that processes pending documents across all tenant workspaces.
+
+### Verification and release evidence
+
+- Automated API suite: 232 passing tests, with one opt-in live end-to-end test deselected from the default suite.
+- Captured V0.2 evidence for structured grounded answers, SkyForge role isolation, cross-workspace denial and audit correlation, API quality checks, web quality checks, and Terraform no-drift verification.
+- Added V0.2 release and demo documentation.
+
+### Known limitations
+
+- V0.2 remains a local-development learning baseline; it is not a production deployment.
+- Database row-level security, workload IAM roles, secrets management, private networking, WAF, CloudTrail, centralized audit retention, and broader red-team/evaluation coverage remain future work.
+
+## [0.1.0] - 2026-08-27
 
 ### Added
 

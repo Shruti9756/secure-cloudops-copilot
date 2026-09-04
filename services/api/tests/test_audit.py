@@ -11,6 +11,7 @@ def make_tenant() -> Tenant:
     """Build an in-memory tenant without needing a live database."""
     return Tenant(
         id=uuid4(),
+        organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
     )
@@ -41,6 +42,7 @@ def test_record_audit_event_adds_safe_structured_metadata() -> None:
 
     assert isinstance(event, AuditEvent)
     assert event.tenant_id == tenant.id
+    assert event.organization_id == tenant.organization_id
     assert event.event_type == "rag.answer_requested"
     assert event.outcome == "succeeded"
     assert event.actor_type == "local_demo"
@@ -100,3 +102,23 @@ def test_record_audit_event_rejects_non_scalar_metadata_values() -> None:
         )
 
     session.add.assert_not_called()
+
+
+def test_record_audit_event_allows_events_before_organization_scope_is_known() -> None:
+    """Authentication failures can be recorded before a workspace is resolved."""
+    session = Mock()
+
+    event = record_audit_event(
+        session,
+        tenant=None,
+        event_type="identity.authentication_failed",
+        outcome="denied",
+        actor_type="anonymous",
+        actor_id=None,
+        request_id="request-unauthenticated",
+        metadata={"audit_status": "invalid_credentials"},
+    )
+
+    assert event.tenant_id is None
+    assert event.organization_id is None
+    session.add.assert_called_once_with(event)

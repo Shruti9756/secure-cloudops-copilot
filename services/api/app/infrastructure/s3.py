@@ -12,6 +12,7 @@ from app.core.config import Settings, get_settings
 
 S3_REDACTED_DOCUMENT_CONTENT_TYPE = "text/plain; charset=utf-8"
 S3_SERVER_SIDE_ENCRYPTION = "AES256"
+MAX_PRESIGNED_DOWNLOAD_EXPIRY_SECONDS = 900
 
 TENANT_SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 
@@ -25,6 +26,15 @@ class S3Client(Protocol):
 
     def put_object(self, **kwargs: Any) -> dict[str, Any]:
         """Store one object and return S3 response metadata."""
+
+    def generate_presigned_url(
+        self,
+        *,
+        ClientMethod: str,
+        Params: dict[str, Any],
+        ExpiresIn: int,
+    ) -> str:
+        """Create a short-lived signed URL for one server-authorized operation."""
 
 
 @dataclass(frozen=True)
@@ -125,6 +135,45 @@ class S3RedactedDocumentStore:
             version_id=version_id if isinstance(version_id, str) else None,
             e_tag=e_tag if isinstance(e_tag, str) else None,
         )
+
+    def create_presigned_download_url(
+        self,
+        *,
+        reference: S3DocumentReference,
+        expires_in_seconds: int,
+    ) -> str:
+        """Create a short-lived download URL for one stored redacted text version."""
+        if not isinstance(expires_in_seconds, int) or isinstance(expires_in_seconds, bool):
+            raise TypeError("Presigned download expiry must be an integer")
+
+        if not 1 <= expires_in_seconds <= MAX_PRESIGNED_DOWNLOAD_EXPIRY_SECONDS:
+            raise ValueError(
+                "Presigned download expiry must be between 1 and "
+                f"{MAX_PRESIGNED_DOWNLOAD_EXPIRY_SECONDS} seconds"
+            )
+
+        if reference.bucket_name != self._bucket_name:
+            raise ValueError("S3 reference must belong to the configured bucket")
+
+        if not reference.object_key.startswith("tenants/"):
+            raise ValueError("S3 reference must use the controlled tenant prefix")
+
+        parameters: dict[str, Any] = {
+            "Bucket": reference.bucket_name,
+            "Key": reference.object_key,
+        }
+
+        if reference.version_id is not None:
+            parameters["VersionId"] = reference.version_id
+
+        try:
+            return self._client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params=parameters,
+                ExpiresIn=expires_in_seconds,
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise S3DocumentStorageUnavailableError("S3 document storage is unavailable") from error
 
     def _build_client(self) -> S3Client:
         """Create a signed local S3 client or an IAM-role client in AWS."""

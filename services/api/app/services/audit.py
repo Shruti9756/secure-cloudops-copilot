@@ -46,6 +46,7 @@ def record_audit_event(
 
     event = AuditEvent(
         tenant_id=tenant.id if tenant is not None else None,
+        organization_id=tenant.organization_id if tenant is not None else None,
         event_type=event_type,
         outcome=outcome,
         actor_type=actor_type,
