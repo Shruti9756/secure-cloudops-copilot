@@ -8,9 +8,9 @@ Teams can upload synthetic runbooks, deployment records, Markdown, TXT, digital 
 
 ## Current status
 
-[V0.1.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.1.0) is released.
+[V0.1.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.1.0) and [V0.2.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.2.0) are released.
 
-V0.2 is the current release candidate: **multi-tenant secure RAG**. It adds Cognito authentication, organization and workspace isolation, role-based access control, document visibility levels, safer audit events, PII redaction, authorized S3 document downloads, and strict structured model-output validation.
+V0.2 is the current completed milestone: **multi-tenant secure RAG**. It adds Cognito authentication, organization and workspace isolation, role-based access control, document visibility levels, safer audit events, PII redaction, authorized S3 document downloads, and strict structured model-output validation.
 
 ## What works today
 

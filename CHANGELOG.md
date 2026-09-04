@@ -8,7 +8,7 @@ This project follows semantic versioning. The V0.x releases are learning and por
 
 No unreleased product changes are recorded yet.
 
-## [0.2.0] - Release candidate
+## [0.2.0] - 2026-09-04
 
 ### Identity, authorization, and isolation
 
