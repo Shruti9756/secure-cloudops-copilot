@@ -1,0 +1,130 @@
+{
+  "benchmark_suite": {
+    "path": "docs/evaluation/retrieval-eval-cases-v1.json",
+    "name": "SecureCloudOps Retrieval Evaluation Cases",
+    "version": "v1",
+    "case_count": 8
+  },
+  "recorded_on": "2026-09-07",
+  "configuration": {
+    "retrieval_strategy": "semantic pgvector cosine-distance retrieval",
+    "embedding_model": "mxbai-embed-large",
+    "retrieval_limit": 3,
+    "maximum_cosine_distance": 0.4,
+    "corpus_scope": "All embedded, readable NimbusCart documents in the local development database. This includes synthetic uploaded documents."
+  },
+  "aggregate_metrics": {
+    "mean_precision_at_3": 0.333,
+    "mean_recall_at_3": 0.875,
+    "total_query_input_tokens": 137
+  },
+  "case_results": [
+    {
+      "id": "RET-EVAL-001",
+      "precision_at_3": 0.667,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "deployments/checkout-2.4.0.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1"
+      ],
+      "matched_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-002",
+      "precision_at_3": 0.333,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1",
+        "runbooks/checkout-latency.md#chunk-0"
+      ],
+      "matched_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-003",
+      "precision_at_3": 0.333,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0",
+        "company-overview.md#chunk-1",
+        "runbooks/checkout-latency.md#chunk-0"
+      ],
+      "matched_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-004",
+      "precision_at_3": 0.333,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1",
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ],
+      "matched_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-005",
+      "precision_at_3": 0.333,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1",
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ],
+      "matched_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-006",
+      "precision_at_3": 0.0,
+      "recall_at_3": 0.0,
+      "retrieved_source_identifiers": [
+        "uploads/secure-cloudops-upload-test.md#chunk-0",
+        "uploads/secure-cloudops-upload-audit-test.md#chunk-0",
+        "uploads/v0-1-upload-demo.md#chunk-0"
+      ],
+      "matched_source_identifiers": []
+    },
+    {
+      "id": "RET-EVAL-007",
+      "precision_at_3": 0.333,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1",
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ],
+      "matched_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-008",
+      "precision_at_3": 0.333,
+      "recall_at_3": 1.0,
+      "retrieved_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1",
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ],
+      "matched_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    }
+  ],
+  "interpretation": {
+    "exact_target_recall": "Seven of eight benchmark cases retrieved at least one expected source identifier.",
+    "notable_case": "RET-EVAL-006 retrieved semantically relevant synthetic upload documents but none of the catalog's expected runbook target. This needs a relevance-label review before treating it as a retrieval defect."
+  }
+}
