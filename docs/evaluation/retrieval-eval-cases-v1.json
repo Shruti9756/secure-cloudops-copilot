@@ -1,13 +1,13 @@
 {
   "suite_name": "SecureCloudOps Retrieval Evaluation Cases",
   "suite_version": "v1",
-  "description": "A small synthetic baseline for measuring semantic retrieval before V0.3 retrieval improvements. Each expected source identifier is relevant evidence for the question; the suite will grow to 50–100 cases before the V0.3 release gate.",
+  "description": "A small synthetic baseline for measuring semantic retrieval before V0.3 retrieval improvements. It runs in the dedicated retrieval-evaluation workspace, seeded only from docs/demo-data, so changing upload demos cannot alter its corpus. Each expected source identifier is relevant evidence for the question; the suite will grow to 50–100 cases before the V0.3 release gate.",
   "default_retrieval_limit": 3,
   "cases": [
     {
       "id": "RET-EVAL-001",
       "category": "deployment_impact",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "Why did checkout latency increase after the deployment?",
       "expected_source_identifiers": [
         "deployments/checkout-2.4.0.md#chunk-0",
@@ -17,7 +17,7 @@
     {
       "id": "RET-EVAL-002",
       "category": "deployment_configuration",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "Which PostgreSQL connection-pool setting changed in checkout version 2.4.0?",
       "expected_source_identifiers": [
         "deployments/checkout-2.4.0.md#chunk-0"
@@ -26,7 +26,7 @@
     {
       "id": "RET-EVAL-003",
       "category": "deployment_metadata",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "Did checkout version 2.4.0 include a database schema migration?",
       "expected_source_identifiers": [
         "deployments/checkout-2.4.0.md#chunk-0"
@@ -35,7 +35,7 @@
     {
       "id": "RET-EVAL-004",
       "category": "runbook_trigger",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "When should the checkout latency investigation runbook be used?",
       "expected_source_identifiers": [
         "runbooks/checkout-latency.md#chunk-0"
@@ -44,7 +44,7 @@
     {
       "id": "RET-EVAL-005",
       "category": "initial_investigation",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "Which PostgreSQL signals should be checked during a checkout latency investigation?",
       "expected_source_identifiers": [
         "runbooks/checkout-latency.md#chunk-0"
@@ -53,7 +53,7 @@
     {
       "id": "RET-EVAL-006",
       "category": "redis_diagnosis",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "What should be investigated if Redis eviction count rises?",
       "expected_source_identifiers": [
         "runbooks/checkout-latency.md#chunk-1"
@@ -62,7 +62,7 @@
     {
       "id": "RET-EVAL-007",
       "category": "database_escalation",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "When should the Database On-Call be escalated for checkout latency?",
       "expected_source_identifiers": [
         "runbooks/checkout-latency.md#chunk-1"
@@ -71,7 +71,7 @@
     {
       "id": "RET-EVAL-008",
       "category": "downstream_dependency",
-      "tenant": "nimbuscart",
+      "tenant": "retrieval-evaluation",
       "question": "What should be investigated when orders latency rises with checkout latency?",
       "expected_source_identifiers": [
         "runbooks/checkout-latency.md#chunk-1"
