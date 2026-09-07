@@ -161,6 +161,8 @@ def chunk_pending_documents(
             KnowledgeDocument.ingestion_status == "pending",
         )
         .order_by(KnowledgeDocument.source_path)
+        # Claim only document rows. Competing processors skip claimed work.
+        .with_for_update(of=KnowledgeDocument, skip_locked=True)
     )
     documents = list(session.scalars(statement))
 

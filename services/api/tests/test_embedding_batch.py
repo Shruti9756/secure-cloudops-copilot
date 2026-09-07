@@ -2,6 +2,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.db.models import DocumentChunk, KnowledgeDocument
 from app.services.embedding_persistence import embed_chunked_documents
@@ -66,13 +67,14 @@ def test_embed_chunked_documents_scopes_work_to_one_tenant_query() -> None:
     )
 
     statement = session.scalars.call_args.args[0]
-    statement_sql = str(statement)
+    statement_sql = str(statement.compile(dialect=postgresql.dialect()))
 
     # The query includes both tenant isolation and the chunked-only status filter.
     assert "JOIN tenants" in statement_sql
     assert "tenants.slug" in statement_sql
     assert "knowledge_documents.ingestion_status" in statement_sql
     assert "ORDER BY knowledge_documents.source_path" in statement_sql
+    assert "FOR UPDATE OF knowledge_documents SKIP LOCKED" in statement_sql
 
     assert len(results) == 1
     assert results[0].source_path == "runbooks/checkout-latency.md"
