@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DocumentChunk, KnowledgeDocument, Tenant
 from app.services.document_access import (
-    ALL_DOCUMENT_ACCESS_LEVELS,
     DEFAULT_DOCUMENT_ACCESS_LEVELS,
     DocumentAccessLevel,
+    normalize_document_access_levels,
 )
 from app.services.prompt_injection import detect_prompt_injection
 
@@ -57,7 +57,7 @@ def retrieve_relevant_chunks(
     normalized_embedding_model = embedding_model.strip()
     normalized_query_vector = _normalize_query_vector(query_vector)
     normalized_max_cosine_distance = _normalize_max_cosine_distance(max_cosine_distance)
-    normalized_document_access_levels = _normalize_document_access_levels(
+    normalized_document_access_levels = normalize_document_access_levels(
         allowed_document_access_levels
     )
 
@@ -175,18 +175,3 @@ def _normalize_max_cosine_distance(max_cosine_distance: float) -> float:
         raise ValueError("Maximum cosine distance must be between 0 and 2")
 
     return normalized_distance
-
-
-def _normalize_document_access_levels(
-    allowed_document_access_levels: Collection[DocumentAccessLevel],
-) -> frozenset[DocumentAccessLevel]:
-    """Reject unknown or empty document-visibility rules before SQL executes."""
-    normalized_access_levels = frozenset(allowed_document_access_levels)
-
-    if not normalized_access_levels:
-        raise ValueError("At least one document access level is required")
-
-    if not normalized_access_levels.issubset(ALL_DOCUMENT_ACCESS_LEVELS):
-        raise ValueError("Document access levels must be supported")
-
-    return normalized_access_levels
