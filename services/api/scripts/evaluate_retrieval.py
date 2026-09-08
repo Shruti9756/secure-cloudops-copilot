@@ -7,6 +7,7 @@ from app.db.session import get_session_factory
 from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.services.retrieval import MAX_RETRIEVAL_LIMIT
 from app.services.retrieval_evaluation_runner import (
+    SUPPORTED_RETRIEVAL_STRATEGIES,
     RetrievalEvaluationCase,
     RetrievalEvaluationReport,
     run_retrieval_evaluation,
@@ -32,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_CATALOG_PATH,
         help=f"Path to the retrieval benchmark JSON (default: {DEFAULT_CATALOG_PATH}).",
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=sorted(SUPPORTED_RETRIEVAL_STRATEGIES),
+        default="semantic",
+        help="Retrieval strategy to measure (default: semantic).",
     )
     parser.add_argument(
         "--limit",
@@ -117,12 +124,19 @@ def print_retrieval_evaluation_report(report: RetrievalEvaluationReport) -> None
     print("Retrieval evaluation completed")
     print(f"Cases evaluated: {len(report.case_results)}")
     print(f"Retrieval limit: {report.requested_k}")
+    print(f"Retrieval strategy: {report.retrieval_strategy}")
     print(f"Mean Precision@{report.requested_k}: {report.mean_precision_at_k:.3f}")
     print(f"Mean Recall@{report.requested_k}: {report.mean_recall_at_k:.3f}")
     print(f"Total query input tokens: {report.total_query_input_tokens}")
 
-    embedding_models = sorted({result.embedding_model for result in report.case_results})
-    print(f"Embedding model: {', '.join(embedding_models)}")
+    embedding_models = sorted(
+        {
+            result.embedding_model
+            for result in report.case_results
+            if result.embedding_model is not None
+        }
+    )
+    print(f"Embedding model: {', '.join(embedding_models) if embedding_models else '(not used)'}")
     print()
     print("Per-case results:")
 
@@ -237,6 +251,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             cases=cases,
             embedding_provider=embedding_provider,
             limit=limit,
+            strategy=args.strategy,
         )
 
     print_retrieval_evaluation_report(report)

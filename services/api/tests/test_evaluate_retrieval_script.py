@@ -36,13 +36,29 @@ def test_parse_arguments_uses_the_versioned_catalog_by_default() -> None:
 
     assert args.catalog == DEFAULT_CATALOG_PATH
     assert args.limit is None
+    assert args.strategy == "semantic"
 
 
 def test_parse_arguments_accepts_a_catalog_path_and_retrieval_limit() -> None:
-    args = parse_arguments(("--catalog", "custom-cases.json", "--limit", "2"))
+    args = parse_arguments(
+        (
+            "--catalog",
+            "custom-cases.json",
+            "--limit",
+            "2",
+            "--strategy",
+            "hybrid",
+        )
+    )
 
     assert args.catalog == Path("custom-cases.json")
     assert args.limit == 2
+    assert args.strategy == "hybrid"
+
+
+def test_parse_arguments_rejects_an_unsupported_strategy() -> None:
+    with pytest.raises(SystemExit):
+        parse_arguments(("--strategy", "unsupported"))
 
 
 @pytest.mark.parametrize("limit", ("0", "11"))
