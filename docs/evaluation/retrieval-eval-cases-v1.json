@@ -1,7 +1,7 @@
 {
   "suite_name": "SecureCloudOps Retrieval Evaluation Cases",
   "suite_version": "v1",
-  "description": "A small synthetic baseline for measuring semantic retrieval before V0.3 retrieval improvements. It runs in the dedicated retrieval-evaluation workspace, seeded only from docs/demo-data, so changing upload demos cannot alter its corpus. Each expected source identifier is relevant evidence for the question; the suite will grow to 50–100 cases before the V0.3 release gate.",
+  "description": "A small synthetic benchmark for measuring semantic, lexical, and hybrid retrieval. It runs in the dedicated retrieval-evaluation workspace, seeded only from versioned documents under docs/demo-data, so changing upload demos cannot alter its corpus. Each expected source identifier is labeled before measurement; the suite will grow to 50–100 cases before the V0.3 release gate.",
   "default_retrieval_limit": 3,
   "cases": [
     {
@@ -75,6 +75,42 @@
       "question": "What should be investigated when orders latency rises with checkout latency?",
       "expected_source_identifiers": [
         "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-009",
+      "category": "versioned_configuration",
+      "tenant": "retrieval-evaluation",
+      "question": "Which PostgreSQL connection-pool idle timeout did checkout version 2.4.1 restore?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-010",
+      "category": "versioned_deployment_metadata",
+      "tenant": "retrieval-evaluation",
+      "question": "Did checkout version 2.4.1 include a database schema migration?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-011",
+      "category": "exact_incident_identifier",
+      "tenant": "retrieval-evaluation",
+      "question": "What should be investigated when PAYMENT-GATEWAY-429 appears?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-012",
+      "category": "payment_provider_paraphrase",
+      "tenant": "retrieval-evaluation",
+      "question": "The card processor is throttling checkout authorizations. Which investigation should begin?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
       ]
     }
   ]
