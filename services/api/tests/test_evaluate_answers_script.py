@@ -14,6 +14,7 @@ from scripts.evaluate_answers import (
     load_answer_evaluation_catalog,
     parse_arguments,
     print_answer_evaluation_report,
+    select_answer_evaluation_cases,
 )
 
 
@@ -64,6 +65,7 @@ def test_parse_arguments_uses_the_versioned_catalog_by_default() -> None:
 
     assert args.catalog == DEFAULT_CATALOG_PATH
     assert args.limit is None
+    assert args.case_ids is None
 
 
 def test_parse_arguments_accepts_a_custom_catalog_and_limit() -> None:
@@ -73,11 +75,73 @@ def test_parse_arguments_accepts_a_custom_catalog_and_limit() -> None:
             "custom-answer-cases.json",
             "--limit",
             "2",
+            "--case-id",
+            "ANSWER-EVAL-004",
+            "--case-id",
+            "ANSWER-EVAL-002",
         )
     )
 
     assert args.catalog == Path("custom-answer-cases.json")
     assert args.limit == 2
+    assert args.case_ids == [
+        "ANSWER-EVAL-004",
+        "ANSWER-EVAL-002",
+    ]
+
+
+def test_select_answer_evaluation_cases_preserves_requested_order() -> None:
+    first_case = AnswerEvaluationCase(
+        case_id="ANSWER-EVAL-001",
+        category="grounded_answer",
+        tenant_slug="retrieval-evaluation",
+        question="First question?",
+        expected_outcome="grounded",
+        expected_source_identifiers=("deployments/checkout-2.4.0.md#chunk-0",),
+    )
+    second_case = AnswerEvaluationCase(
+        case_id="ANSWER-EVAL-002",
+        category="insufficient_evidence",
+        tenant_slug="retrieval-evaluation",
+        question="Second question?",
+        expected_outcome="insufficient_evidence",
+        expected_source_identifiers=(),
+    )
+
+    selected_cases = select_answer_evaluation_cases(
+        (first_case, second_case),
+        ("ANSWER-EVAL-002", "ANSWER-EVAL-001"),
+    )
+
+    assert selected_cases == (second_case, first_case)
+
+
+def test_select_answer_evaluation_cases_rejects_an_unknown_id() -> None:
+    case = AnswerEvaluationCase(
+        case_id="ANSWER-EVAL-001",
+        category="grounded_answer",
+        tenant_slug="retrieval-evaluation",
+        question="A question?",
+        expected_outcome="grounded",
+        expected_source_identifiers=("deployments/checkout-2.4.0.md#chunk-0",),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown answer-evaluation case ID",
+    ):
+        select_answer_evaluation_cases(
+            (case,),
+            ("ANSWER-EVAL-999",),
+        )
+
+
+def test_select_answer_evaluation_cases_rejects_duplicate_ids() -> None:
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        select_answer_evaluation_cases(
+            (),
+            ("ANSWER-EVAL-001", "ANSWER-EVAL-001"),
+        )
 
 
 @pytest.mark.parametrize("limit", ("0", "11"))

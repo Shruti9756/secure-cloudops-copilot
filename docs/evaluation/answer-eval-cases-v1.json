@@ -22,6 +22,61 @@
       "question": "Which Kubernetes version is running in production?",
       "expected_outcome": "insufficient_evidence",
       "expected_source_identifiers": []
+    },
+    {
+      "id": "ANSWER-EVAL-003",
+      "category": "versioned_configuration",
+      "tenant": "retrieval-evaluation",
+      "question": "Which PostgreSQL connection-pool idle timeout did checkout version 2.4.1 restore?",
+      "expected_outcome": "grounded",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-004",
+      "category": "exact_incident_identifier",
+      "tenant": "retrieval-evaluation",
+      "question": "What should be investigated when PAYMENT-GATEWAY-429 appears?",
+      "expected_outcome": "grounded",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-005",
+      "category": "redis_diagnosis",
+      "tenant": "retrieval-evaluation",
+      "question": "What should be investigated if Redis eviction count rises?",
+      "expected_outcome": "grounded",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-006",
+      "category": "insufficient_evidence_hr",
+      "tenant": "retrieval-evaluation",
+      "question": "How many paid parental-leave weeks do employees receive?",
+      "expected_outcome": "insufficient_evidence",
+      "expected_source_identifiers": []
+    },
+    {
+      "id": "ANSWER-EVAL-007",
+      "category": "insufficient_evidence_infrastructure_inventory",
+      "tenant": "retrieval-evaluation",
+      "question": "Which TLS certificate expires next in production?",
+      "expected_outcome": "insufficient_evidence",
+      "expected_source_identifiers": []
+    },
+    {
+      "id": "ANSWER-EVAL-008",
+      "category": "insufficient_evidence_financial",
+      "tenant": "retrieval-evaluation",
+      "question": "What was the company's revenue in the previous quarter?",
+      "expected_outcome": "insufficient_evidence",
+      "expected_source_identifiers": []
     }
   ]
 }

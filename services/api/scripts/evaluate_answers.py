@@ -47,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to default_retrieval_limit in the catalog."
         ),
     )
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        dest="case_ids",
+        help=(
+            "Run only one evaluation case ID. Repeat this option to run multiple selected cases."
+        ),
+    )
 
     return parser
 
@@ -113,6 +121,34 @@ def load_answer_evaluation_catalog(
         raise ValueError("Answer evaluation catalog case IDs must be unique")
 
     return default_limit, cases
+
+
+def select_answer_evaluation_cases(
+    cases: Sequence[AnswerEvaluationCase],
+    requested_case_ids: Sequence[str] | None,
+) -> tuple[AnswerEvaluationCase, ...]:
+    """Select requested cases while rejecting unknown or duplicate IDs."""
+
+    if not requested_case_ids:
+        return tuple(cases)
+
+    normalized_case_ids = tuple(case_id.strip() for case_id in requested_case_ids)
+
+    if any(not case_id for case_id in normalized_case_ids):
+        raise ValueError("Requested answer-evaluation case IDs must not be empty")
+
+    if len(normalized_case_ids) != len(set(normalized_case_ids)):
+        raise ValueError("Requested answer-evaluation case IDs must not contain duplicates")
+
+    cases_by_id = {case.case_id: case for case in cases}
+    unknown_case_ids = tuple(
+        case_id for case_id in normalized_case_ids if case_id not in cases_by_id
+    )
+
+    if unknown_case_ids:
+        raise ValueError(f"Unknown answer-evaluation case ID(s): {', '.join(unknown_case_ids)}")
+
+    return tuple(cases_by_id[case_id] for case_id in normalized_case_ids)
 
 
 def print_answer_evaluation_report(report: AnswerEvaluationReport) -> None:
@@ -272,6 +308,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     args = parse_arguments(argv)
     catalog_limit, cases = load_answer_evaluation_catalog(args.catalog)
+    selected_cases = select_answer_evaluation_cases(cases, args.case_ids)
     limit = args.limit if args.limit is not None else catalog_limit
 
     embedding_provider = OllamaEmbeddingClient()
@@ -281,7 +318,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     with session_factory() as session:
         report = run_answer_evaluation(
             session=session,
-            cases=cases,
+            cases=selected_cases,
             embedding_provider=embedding_provider,
             chat_provider=chat_provider,
             limit=limit,
