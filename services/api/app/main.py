@@ -39,6 +39,7 @@ from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.infrastructure.s3 import S3DocumentStorageUnavailableError
+from app.services.answer_status import AnswerStatus, get_answer_status
 from app.services.audit import AuditOutcome, record_audit_event
 from app.services.authorization import (
     AuthenticatedPrincipal,
@@ -148,13 +149,7 @@ class RetrievedSourceResponse(BaseModel):
 class AskResponse(BaseModel):
     """A grounded RAG answer plus traceability and local-model usage metadata."""
 
-    status: Literal[
-        "grounded",
-        "insufficient_evidence",
-        "structured_output_validation_failed",
-        "citation_validation_failed",
-        "safety_validation_failed",
-    ]
+    status: AnswerStatus
     answer: str
     tenant: str
     embedding_model: str
@@ -521,31 +516,6 @@ def get_client_identifier(request: Request) -> str:
 
     # We will configure trusted proxy handling explicitly before using AWS-forwarded IPs.
     return request.client.host
-
-
-def get_answer_status(
-    answer: GroundedAnswer,
-) -> Literal[
-    "grounded",
-    "insufficient_evidence",
-    "structured_output_validation_failed",
-    "citation_validation_failed",
-    "safety_validation_failed",
-]:
-    """Map internal RAG outcomes to a stable, client-safe API status."""
-    if not answer.sources:
-        return "insufficient_evidence"
-
-    if answer.structured_output_validation_passed is False:
-        return "structured_output_validation_failed"
-
-    if answer.citation_validation is not None and not answer.citation_validation.is_valid:
-        return "citation_validation_failed"
-
-    if answer.safety_validation is not None and not answer.safety_validation.is_safe:
-        return "safety_validation_failed"
-
-    return "grounded"
 
 
 def build_ask_response(
