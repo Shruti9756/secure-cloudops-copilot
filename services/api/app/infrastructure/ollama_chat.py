@@ -8,10 +8,10 @@ from app.services.chat import ChatCompletion, ChatMessage
 
 # The 4B instruct model follows strict citation rules more reliably for this RAG demo.
 OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID = "qwen3:4b-instruct"
-OLLAMA_CHAT_TIMEOUT_SECONDS = 300
+OLLAMA_CHAT_TIMEOUT_SECONDS = 480
 
 # Local CPU inference must stay bounded; grounded incident answers should be concise.
-OLLAMA_MAX_GENERATION_TOKENS = 64
+OLLAMA_MAX_GENERATION_TOKENS = 96
 ALLOWED_CHAT_ROLES = frozenset({"assistant", "system", "user"})
 
 JsonObject = dict[str, Any]

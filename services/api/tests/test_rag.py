@@ -116,6 +116,10 @@ def test_rag_builds_guarded_prompt_and_accepts_valid_citation() -> None:
     assert "ALLOWED SOURCE IDENTIFIERS" in user_message.content
     assert "deployments/checkout-2.4.0.md#chunk-0" in user_message.content
     assert "Return only JSON" in user_message.content
+    assert '"due to", "caused by", "confirmed", or "root cause"' in (system_message.content)
+    assert "exactly one short sentence" in system_message.content
+    assert "preserve that uncertainty" in user_message.content
+    assert "smallest set of sources" in user_message.content
 
 
 def test_rag_does_not_send_suspicious_evidence_to_chat_provider() -> None:

@@ -62,12 +62,14 @@ Follow these rules:
    The answer value must not contain citations. The citations list must contain one or
    more source identifiers from the supplied allowlist. Do not include extra fields
    or any text outside the JSON object.
-6. Do not state a causal conclusion as fact when evidence describes only a hypothesis.
-   Use wording such as "likely hypothesis" or "may indicate" in that situation.
+6. When evidence describes only a hypothesis, do not use causal phrases such as
+   "due to", "caused by", "confirmed", or "root cause". State it as a likely
+   hypothesis that still requires verification.
 7. If the evidence is insufficient, say so plainly instead of guessing.
 8. Do not provide actions that modify infrastructure. You may suggest read-only checks
    when they are supported by the evidence.
-9. Keep the answer value to at most two short sentences.
+9. Keep the answer value to exactly one short sentence. Cite only the smallest set
+   of sources that directly support that sentence.
 """
 
 
@@ -252,8 +254,11 @@ def build_grounded_messages(
                 "END ALLOWED SOURCE IDENTIFIERS\n\n"
                 "Return only JSON. Use exactly this shape: "
                 '{"answer": "short answer", "citations": ["path#chunk-index"]}. '
-                "Keep the answer value to at most two short sentences. Copy every "
-                "citation value exactly from the allowed source identifier list."
+                "Keep the answer value to exactly one short sentence. When evidence "
+                "presents a hypothesis, preserve that uncertainty and do not claim it "
+                "was confirmed. Cite only the smallest set of sources that directly "
+                "supports the answer. Copy every citation value exactly from the "
+                "allowed source identifier list."
             ),
         ),
     ]
