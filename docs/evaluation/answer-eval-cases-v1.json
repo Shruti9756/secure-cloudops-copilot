@@ -1,0 +1,27 @@
+{
+  "suite_name": "SecureCloudOps Answer Evaluation Cases",
+  "suite_version": "v1",
+  "description": "Executable grounded-answer and safe-abstention cases for the controlled retrieval-evaluation workspace.",
+  "default_retrieval_limit": 3,
+  "cases": [
+    {
+      "id": "ANSWER-EVAL-001",
+      "category": "grounded_answer",
+      "tenant": "retrieval-evaluation",
+      "question": "Why did checkout latency increase after deployment 2.4.0?",
+      "expected_outcome": "grounded",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-002",
+      "category": "insufficient_evidence",
+      "tenant": "retrieval-evaluation",
+      "question": "Which Kubernetes version is running in production?",
+      "expected_outcome": "insufficient_evidence",
+      "expected_source_identifiers": []
+    }
+  ]
+}
