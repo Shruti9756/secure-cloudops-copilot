@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -61,6 +62,7 @@ class RetrievalEvaluationCaseResult:
     recall_at_k: float
     query_input_token_count: int
     embedding_model: str | None
+    retrieval_duration_ms: float
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,9 @@ class RetrievalEvaluationReport:
     mean_precision_at_k: float
     mean_recall_at_k: float
     total_query_input_tokens: int
+    mean_retrieval_duration_ms: float
+    p50_retrieval_duration_ms: float
+    p95_retrieval_duration_ms: float
 
 
 def run_retrieval_evaluation(
@@ -102,6 +107,7 @@ def run_retrieval_evaluation(
         for case in cases
     )
 
+    retrieval_durations_ms = tuple(result.retrieval_duration_ms for result in case_results)
     return RetrievalEvaluationReport(
         retrieval_strategy=strategy,
         requested_k=limit,
@@ -110,6 +116,15 @@ def run_retrieval_evaluation(
         / len(case_results),
         mean_recall_at_k=sum(result.recall_at_k for result in case_results) / len(case_results),
         total_query_input_tokens=sum(result.query_input_token_count for result in case_results),
+        mean_retrieval_duration_ms=(sum(retrieval_durations_ms) / len(retrieval_durations_ms)),
+        p50_retrieval_duration_ms=_calculate_percentile(
+            retrieval_durations_ms,
+            0.50,
+        ),
+        p95_retrieval_duration_ms=_calculate_percentile(
+            retrieval_durations_ms,
+            0.95,
+        ),
     )
 
 
@@ -121,7 +136,8 @@ def _evaluate_case(
     limit: int,
 ) -> RetrievalEvaluationCaseResult:
     """Run one selected retrieval strategy and measure its evidence matches."""
-
+    # Include query embedding plus database retrieval, fusion, and reranking.
+    retrieval_started_at = perf_counter()
     retrieved_chunks: list[EvaluationRetrievedChunk]
     query_input_token_count: int
     embedding_model: str | None
@@ -168,6 +184,7 @@ def _evaluate_case(
         query_input_token_count = query_embedding.input_text_token_count
         embedding_model = query_embedding.model_id
 
+    retrieval_duration_ms = (perf_counter() - retrieval_started_at) * 1000
     retrieval_measurement = evaluate_retrieval_at_k(
         expected_source_identifiers=case.expected_source_identifiers,
         retrieved_source_identifiers=tuple(_source_identifier(chunk) for chunk in retrieved_chunks),
@@ -182,6 +199,31 @@ def _evaluate_case(
         recall_at_k=retrieval_measurement.recall_at_k,
         query_input_token_count=query_input_token_count,
         embedding_model=embedding_model,
+        retrieval_duration_ms=retrieval_duration_ms,
+    )
+
+
+def _calculate_percentile(
+    values: Sequence[float],
+    percentile: float,
+) -> float:
+    """Calculate a linearly interpolated percentile for measured durations."""
+
+    if not values:
+        raise ValueError("Percentile values must not be empty")
+
+    if not 0 <= percentile <= 1:
+        raise ValueError("Percentile must be between 0 and 1")
+
+    ordered_values = sorted(values)
+    position = (len(ordered_values) - 1) * percentile
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(ordered_values) - 1)
+    interpolation_weight = position - lower_index
+
+    return (
+        ordered_values[lower_index]
+        + (ordered_values[upper_index] - ordered_values[lower_index]) * interpolation_weight
     )
 
 

@@ -128,6 +128,9 @@ def print_retrieval_evaluation_report(report: RetrievalEvaluationReport) -> None
     print(f"Mean Precision@{report.requested_k}: {report.mean_precision_at_k:.3f}")
     print(f"Mean Recall@{report.requested_k}: {report.mean_recall_at_k:.3f}")
     print(f"Total query input tokens: {report.total_query_input_tokens}")
+    print(f"Mean retrieval latency: {report.mean_retrieval_duration_ms:.3f} ms")
+    print(f"P50 retrieval latency: {report.p50_retrieval_duration_ms:.3f} ms")
+    print(f"P95 retrieval latency: {report.p95_retrieval_duration_ms:.3f} ms")
 
     embedding_models = sorted(
         {

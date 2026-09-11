@@ -84,6 +84,18 @@ def test_run_retrieval_evaluation_aggregates_semantic_measurements(
 ) -> None:
     session = Mock()
     embedding_provider = FakeEmbeddingProvider()
+    clock = Mock(
+        side_effect=(
+            10.000,
+            10.025,
+            20.000,
+            20.075,
+        )
+    )
+    monkeypatch.setattr(
+        "app.services.retrieval_evaluation_runner.perf_counter",
+        clock,
+    )
 
     cases = (
         RetrievalEvaluationCase(
@@ -151,6 +163,11 @@ def test_run_retrieval_evaluation_aggregates_semantic_measurements(
     assert report.mean_recall_at_k == pytest.approx(0.75)
     assert report.case_results[0].matched_source_identifiers == ("deployments/checkout.md#chunk-0",)
     assert report.case_results[1].matched_source_identifiers == ("runbooks/checkout.md#chunk-1",)
+    assert report.case_results[0].retrieval_duration_ms == pytest.approx(25.0)
+    assert report.case_results[1].retrieval_duration_ms == pytest.approx(75.0)
+    assert report.mean_retrieval_duration_ms == pytest.approx(50.0)
+    assert report.p50_retrieval_duration_ms == pytest.approx(50.0)
+    assert report.p95_retrieval_duration_ms == pytest.approx(72.5)
 
 
 def test_run_retrieval_evaluation_uses_lexical_search_without_embedding(
