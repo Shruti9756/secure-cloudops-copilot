@@ -1,7 +1,7 @@
 {
   "suite_name": "SecureCloudOps Retrieval Evaluation Cases",
   "suite_version": "v1",
-  "description": "A small synthetic benchmark for measuring semantic, lexical, and hybrid retrieval. It runs in the dedicated retrieval-evaluation workspace, seeded only from versioned documents under docs/demo-data, so changing upload demos cannot alter its corpus. Each expected source identifier is labeled before measurement; the suite will grow to 50–100 cases before the V0.3 release gate.",
+  "description": "A 50-question synthetic benchmark for measuring semantic, lexical, hybrid, and reranked retrieval. It runs in the dedicated retrieval-evaluation workspace, seeded only from versioned documents under docs/demo-data, so changing upload demos cannot alter its corpus. Each expected source identifier is labeled before measurement.",
   "default_retrieval_limit": 3,
   "cases": [
     {
@@ -109,6 +109,348 @@
       "category": "payment_provider_paraphrase",
       "tenant": "retrieval-evaluation",
       "question": "The card processor is throttling checkout authorizations. Which investigation should begin?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-013",
+      "category": "service_responsibility_storefront",
+      "tenant": "retrieval-evaluation",
+      "question": "Which NimbusCart service provides the customer-facing web experience?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-014",
+      "category": "service_responsibility_catalog",
+      "tenant": "retrieval-evaluation",
+      "question": "Which service owns product search, pricing, and availability?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-015",
+      "category": "service_responsibility_checkout",
+      "tenant": "retrieval-evaluation",
+      "question": "What is the checkout service responsible for?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-016",
+      "category": "service_responsibility_payments",
+      "tenant": "retrieval-evaluation",
+      "question": "Which service integrates with NimbusCart's external payment provider?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-017",
+      "category": "service_responsibility_orders",
+      "tenant": "retrieval-evaluation",
+      "question": "Which service persists confirmed orders and exposes their status?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-018",
+      "category": "service_ownership_notifications",
+      "tenant": "retrieval-evaluation",
+      "question": "Which team owns the notifications service?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-019",
+      "category": "customer_journey",
+      "tenant": "retrieval-evaluation",
+      "question": "What step follows payment authorization in NimbusCart's critical customer journey?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-020",
+      "category": "checkout_request_flow",
+      "tenant": "retrieval-evaluation",
+      "question": "Which service does checkout use to validate a cart?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-021",
+      "category": "asynchronous_notification_flow",
+      "tenant": "retrieval-evaluation",
+      "question": "Which action happens asynchronously after checkout confirmation?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-022",
+      "category": "checkout_latency_objective",
+      "tenant": "retrieval-evaluation",
+      "question": "What is the target for checkout API p95 latency?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-023",
+      "category": "checkout_error_objective",
+      "tenant": "retrieval-evaluation",
+      "question": "What checkout API error-rate objective is documented?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-024",
+      "category": "payment_success_objective",
+      "tenant": "retrieval-evaluation",
+      "question": "What is the payment authorization success-rate target?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-025",
+      "category": "ingestion_success_objective",
+      "tenant": "retrieval-evaluation",
+      "question": "What success-rate objective applies to document ingestion?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-026",
+      "category": "postgresql_dependency",
+      "tenant": "retrieval-evaluation",
+      "question": "Which NimbusCart services depend on PostgreSQL?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-027",
+      "category": "redis_dependency",
+      "tenant": "retrieval-evaluation",
+      "question": "What kind of NimbusCart data is stored temporarily in Redis?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-028",
+      "category": "external_dependency_risk",
+      "tenant": "retrieval-evaluation",
+      "question": "Which important dependency can become slow or unavailable because it is external?",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-029",
+      "category": "deployment_time",
+      "tenant": "retrieval-evaluation",
+      "question": "When was checkout version 2.4.0 deployed?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-030",
+      "category": "deployment_actor",
+      "tenant": "retrieval-evaluation",
+      "question": "What deployed checkout version 2.4.0?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-031",
+      "category": "deployment_change_logging",
+      "tenant": "retrieval-evaluation",
+      "question": "Which logging capability was added in checkout version 2.4.0?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-032",
+      "category": "deployment_payment_timeout",
+      "tenant": "retrieval-evaluation",
+      "question": "How did checkout version 2.4.0 change the payment authorization request timeout?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-033",
+      "category": "post_deployment_latency",
+      "tenant": "retrieval-evaluation",
+      "question": "What checkout p95 latency change was observed at 21:12 UTC after version 2.4.0?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-034",
+      "category": "deployment_hypothesis_verification",
+      "tenant": "retrieval-evaluation",
+      "question": "Which database signals should confirm the connection-recreation hypothesis for checkout 2.4.0?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-035",
+      "category": "deployment_type",
+      "tenant": "retrieval-evaluation",
+      "question": "What type of deployment was checkout version 2.4.1?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-036",
+      "category": "restored_configuration",
+      "tenant": "retrieval-evaluation",
+      "question": "What connection-pool configuration did checkout 2.4.1 restore?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-037",
+      "category": "retained_configuration",
+      "tenant": "retrieval-evaluation",
+      "question": "Which payment authorization timeout remained unchanged in checkout 2.4.1?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-038",
+      "category": "schema_migration_absence",
+      "tenant": "retrieval-evaluation",
+      "question": "Was a database schema migration part of checkout 2.4.1?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-039",
+      "category": "deployment_verification",
+      "tenant": "retrieval-evaluation",
+      "question": "Which metrics should be compared before and after the checkout 2.4.1 rollout?",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-040",
+      "category": "latency_runbook_trigger",
+      "tenant": "retrieval-evaluation",
+      "question": "How long must checkout p95 latency exceed 800 ms before using the latency runbook?",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-041",
+      "category": "error_rate_runbook_trigger",
+      "tenant": "retrieval-evaluation",
+      "question": "What error-rate condition triggers the checkout latency runbook?",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-042",
+      "category": "recent_deployment_check",
+      "tenant": "retrieval-evaluation",
+      "question": "How far back should investigators check for a recent checkout deployment?",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-043",
+      "category": "postgresql_initial_investigation",
+      "tenant": "retrieval-evaluation",
+      "question": "Which PostgreSQL measurements belong in the initial checkout latency investigation?",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-044",
+      "category": "connection_pool_exhaustion",
+      "tenant": "retrieval-evaluation",
+      "question": "What likely cause and first action correspond to PostgreSQL connections exceeding 80 percent?",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-045",
+      "category": "checkout_team_escalation",
+      "tenant": "retrieval-evaluation",
+      "question": "When should a sustained checkout SLO breach be escalated to the Checkout Team?",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-046",
+      "category": "payment_latency_trigger",
+      "tenant": "retrieval-evaluation",
+      "question": "What payment authorization latency threshold activates the payment runbook?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-047",
+      "category": "payment_throttling_trigger",
+      "tenant": "retrieval-evaluation",
+      "question": "Which payment-provider response code is a trigger for the authorization latency runbook?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-048",
+      "category": "payment_investigation_signals",
+      "tenant": "retrieval-evaluation",
+      "question": "Which provider signals should be checked during a payment authorization latency investigation?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-049",
+      "category": "payment_retry_check",
+      "tenant": "retrieval-evaluation",
+      "question": "What checkout retry behavior should be confirmed during a payment incident?",
+      "expected_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "RET-EVAL-050",
+      "category": "payments_team_escalation",
+      "tenant": "retrieval-evaluation",
+      "question": "When should persistent payment throttling be escalated to the Payments Team?",
       "expected_source_identifiers": [
         "runbooks/payments-latency.md#chunk-0"
       ]

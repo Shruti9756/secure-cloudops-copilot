@@ -7,7 +7,8 @@
     "catalog_commit": "0579d20"
   },
   "recorded_on": "2026-09-11",
-  "repository_commit": "0b4300727491e9d769f63919b0bc63012db6f904",
+  "baseline_repository_commit": "0b4300727491e9d769f63919b0bc63012db6f904",
+  "reranker_implementation_commit": "a5a37861044494513f0d5910100fe3c0cd303485",
   "configuration": {
     "tenant": "retrieval-evaluation",
     "corpus_scope": "Only the five versioned documents under docs/demo-data.",
