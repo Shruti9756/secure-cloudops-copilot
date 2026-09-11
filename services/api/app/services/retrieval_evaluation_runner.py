@@ -13,6 +13,7 @@ from app.services.lexical_retrieval import (
     LexicalRetrievedChunk,
     retrieve_lexical_chunks,
 )
+from app.services.reranked_retrieval import retrieve_reranked_hybrid_chunks
 from app.services.retrieval import (
     DEFAULT_RETRIEVAL_LIMIT,
     RetrievedChunk,
@@ -20,7 +21,12 @@ from app.services.retrieval import (
 )
 from app.services.retrieval_evaluation import evaluate_retrieval_at_k
 
-type RetrievalStrategy = Literal["semantic", "lexical", "hybrid"]
+type RetrievalStrategy = Literal[
+    "semantic",
+    "lexical",
+    "hybrid",
+    "hybrid-reranked",
+]
 type EvaluationRetrievedChunk = RetrievedChunk | LexicalRetrievedChunk | HybridRetrievedChunk
 
 SUPPORTED_RETRIEVAL_STRATEGIES: frozenset[RetrievalStrategy] = frozenset(
@@ -28,6 +34,7 @@ SUPPORTED_RETRIEVAL_STRATEGIES: frozenset[RetrievalStrategy] = frozenset(
         "semantic",
         "lexical",
         "hybrid",
+        "hybrid-reranked",
     }
 )
 
@@ -82,7 +89,7 @@ def run_retrieval_evaluation(
         raise ValueError("At least one evaluation case is required")
 
     if strategy not in SUPPORTED_RETRIEVAL_STRATEGIES:
-        raise ValueError("Retrieval strategy must be semantic, lexical, or hybrid")
+        raise ValueError("Retrieval strategy must be semantic, lexical, hybrid, or hybrid-reranked")
 
     case_results = tuple(
         _evaluate_case(
@@ -139,8 +146,17 @@ def _evaluate_case(
                 embedding_model=query_embedding.model_id,
                 limit=limit,
             )
-        else:
+        elif strategy == "hybrid":
             retrieved_chunks = retrieve_hybrid_chunks(
+                session=session,
+                tenant_slug=case.tenant_slug,
+                query=case.question,
+                query_vector=query_embedding.vector,
+                embedding_model=query_embedding.model_id,
+                limit=limit,
+            )
+        else:
+            retrieved_chunks = retrieve_reranked_hybrid_chunks(
                 session=session,
                 tenant_slug=case.tenant_slug,
                 query=case.question,

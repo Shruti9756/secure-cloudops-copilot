@@ -1,0 +1,193 @@
+{
+  "benchmark_suite": {
+    "path": "docs/evaluation/retrieval-eval-cases-v1.json",
+    "name": "SecureCloudOps Retrieval Evaluation Cases",
+    "version": "v1",
+    "case_count": 12,
+    "catalog_commit": "0579d20"
+  },
+  "recorded_on": "2026-09-11",
+  "repository_commit": "0b4300727491e9d769f63919b0bc63012db6f904",
+  "configuration": {
+    "tenant": "retrieval-evaluation",
+    "corpus_scope": "Only the five versioned documents under docs/demo-data.",
+    "document_count": 5,
+    "embedded_chunk_count": 7,
+    "embedding_model": "mxbai-embed-large",
+    "semantic_metric": "pgvector cosine distance",
+    "maximum_cosine_distance": 0.4,
+    "lexical_algorithm": "BM25",
+    "hybrid_fusion": "reciprocal rank fusion",
+    "rrf_k": 60,
+    "hybrid_candidate_multiplier": 3,
+    "reranker": {
+      "strategy": "identifier-gated BM25 over hybrid candidates",
+      "bm25_weight": 0.01,
+      "structured_identifier_rule": "A query token must contain a digit and one of . _ : -",
+      "generic_query_behavior": "Preserve the original reciprocal-rank-fusion order."
+    }
+  },
+  "aggregate_results": [
+    {
+      "retrieval_limit": 1,
+      "strategies": {
+        "semantic": {
+          "mean_precision_at_k": 0.667,
+          "mean_recall_at_k": 0.625,
+          "total_query_input_tokens": 214
+        },
+        "lexical": {
+          "mean_precision_at_k": 0.667,
+          "mean_recall_at_k": 0.667,
+          "total_query_input_tokens": 0
+        },
+        "hybrid": {
+          "mean_precision_at_k": 0.667,
+          "mean_recall_at_k": 0.625,
+          "total_query_input_tokens": 214
+        },
+        "hybrid-reranked": {
+          "mean_precision_at_k": 0.833,
+          "mean_recall_at_k": 0.792,
+          "total_query_input_tokens": 214
+        }
+      }
+    },
+    {
+      "retrieval_limit": 3,
+      "strategies": {
+        "semantic": {
+          "mean_precision_at_k": 0.361,
+          "mean_recall_at_k": 1.0,
+          "total_query_input_tokens": 214
+        },
+        "lexical": {
+          "mean_precision_at_k": 0.361,
+          "mean_recall_at_k": 1.0,
+          "total_query_input_tokens": 0
+        },
+        "hybrid": {
+          "mean_precision_at_k": 0.361,
+          "mean_recall_at_k": 1.0,
+          "total_query_input_tokens": 214
+        },
+        "hybrid-reranked": {
+          "mean_precision_at_k": 0.361,
+          "mean_recall_at_k": 1.0,
+          "total_query_input_tokens": 214
+        }
+      }
+    }
+  ],
+  "top_1_case_results": [
+    {
+      "id": "RET-EVAL-001",
+      "semantic_match": true,
+      "lexical_match": false,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-002",
+      "semantic_match": true,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-003",
+      "semantic_match": false,
+      "lexical_match": false,
+      "hybrid_match": false,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-004",
+      "semantic_match": true,
+      "lexical_match": false,
+      "hybrid_match": false,
+      "hybrid_reranked_match": false
+    },
+    {
+      "id": "RET-EVAL-005",
+      "semantic_match": true,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-006",
+      "semantic_match": true,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-007",
+      "semantic_match": false,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-008",
+      "semantic_match": false,
+      "lexical_match": false,
+      "hybrid_match": false,
+      "hybrid_reranked_match": false
+    },
+    {
+      "id": "RET-EVAL-009",
+      "semantic_match": false,
+      "lexical_match": true,
+      "hybrid_match": false,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-010",
+      "semantic_match": true,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-011",
+      "semantic_match": true,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    },
+    {
+      "id": "RET-EVAL-012",
+      "semantic_match": true,
+      "lexical_match": true,
+      "hybrid_match": true,
+      "hybrid_reranked_match": true
+    }
+  ],
+  "reranking_experiments": [
+    {
+      "name": "ungated metadata-and-content BM25 reranking",
+      "status": "rejected",
+      "retrieval_limit": 1,
+      "mean_precision_at_k": 0.667,
+      "mean_recall_at_k": 0.667,
+      "finding": "Applying the lexical boost to every query fixed RET-EVAL-009 but displaced the correct generic result for RET-EVAL-001, so it did not improve top-one precision."
+    },
+    {
+      "name": "identifier-gated BM25 reranking",
+      "status": "accepted for continued evaluation",
+      "retrieval_limit": 1,
+      "mean_precision_at_k": 0.833,
+      "mean_recall_at_k": 0.792,
+      "finding": "The gate corrected the version-specific RET-EVAL-003 and RET-EVAL-009 results while preserving the original ordering for generic queries such as RET-EVAL-001."
+    }
+  ],
+  "interpretation": {
+    "top_1_result": "Identifier-gated hybrid reranking improved mean precision from 0.667 to 0.833 and mean recall from 0.625 to 0.792 compared with the original hybrid strategy. Ten of twelve cases returned a relevant first result.",
+    "top_3_result": "The reranked strategy retained 0.361 mean precision and 1.000 mean recall, proving that it did not remove expected evidence from the top-three candidate set.",
+    "hybrid_finding": "The current equal-weight reciprocal-rank-fusion implementation did not improve the aggregate result over semantic retrieval.",
+    "reranker_finding": "RET-EVAL-004 and RET-EVAL-008 still place the expected source second, so their remaining error is ranking rather than candidate retrieval.",
+    "next_experiment": "Expand the labeled benchmark toward the V0.3 release target before considering this evaluation-only reranker for the production RAG path."
+  }
+}

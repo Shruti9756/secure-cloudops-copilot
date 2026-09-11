@@ -235,10 +235,52 @@ def test_run_retrieval_evaluation_uses_hybrid_search_after_embedding(
     )
 
 
+def test_run_retrieval_evaluation_uses_reranked_hybrid_search_after_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    embedding_provider = FakeEmbeddingProvider()
+    reranked_retrieval = Mock(return_value=[make_hybrid_chunk("deployments/checkout.md", 0)])
+    monkeypatch.setattr(
+        "app.services.retrieval_evaluation_runner.retrieve_reranked_hybrid_chunks",
+        reranked_retrieval,
+    )
+
+    report = run_retrieval_evaluation(
+        session=session,
+        cases=(
+            RetrievalEvaluationCase(
+                case_id="RET-EVAL-RERANKED",
+                category="deployment",
+                tenant_slug="nimbuscart",
+                question="What changed in checkout?",
+                expected_source_identifiers=("deployments/checkout.md#chunk-0",),
+            ),
+        ),
+        embedding_provider=embedding_provider,
+        strategy="hybrid-reranked",
+        limit=3,
+    )
+
+    assert embedding_provider.texts == ["What changed in checkout?"]
+    assert report.retrieval_strategy == "hybrid-reranked"
+    assert report.total_query_input_tokens == 3
+    assert report.case_results[0].embedding_model == "mxbai-embed-large"
+    assert report.case_results[0].recall_at_k == 1.0
+    reranked_retrieval.assert_called_once_with(
+        session=session,
+        tenant_slug="nimbuscart",
+        query="What changed in checkout?",
+        query_vector=[1.0] + [0.0] * 1023,
+        embedding_model="mxbai-embed-large",
+        limit=3,
+    )
+
+
 def test_run_retrieval_evaluation_rejects_an_unknown_strategy() -> None:
     with pytest.raises(
         ValueError,
-        match="Retrieval strategy must be semantic, lexical, or hybrid",
+        match="Retrieval strategy must be semantic, lexical, hybrid, or hybrid-reranked",
     ):
         run_retrieval_evaluation(
             session=Mock(),

@@ -56,6 +56,12 @@ def test_parse_arguments_accepts_a_catalog_path_and_retrieval_limit() -> None:
     assert args.strategy == "hybrid"
 
 
+def test_parse_arguments_accepts_reranked_hybrid_strategy() -> None:
+    args = parse_arguments(("--strategy", "hybrid-reranked"))
+
+    assert args.strategy == "hybrid-reranked"
+
+
 def test_parse_arguments_rejects_an_unsupported_strategy() -> None:
     with pytest.raises(SystemExit):
         parse_arguments(("--strategy", "unsupported"))
