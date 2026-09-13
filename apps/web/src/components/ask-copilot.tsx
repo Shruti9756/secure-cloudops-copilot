@@ -22,7 +22,7 @@ type AnswerStatus =
 type RetrievedSource = {
   source_identifier: string;
   document_title: string;
-  cosine_distance: number;
+  cosine_distance: number | null;
 };
 
 type AskApiResponse = {
@@ -412,8 +412,10 @@ export function AskCopilot() {
                       {source.source_identifier}
                     </p>
                     <p className="mt-1 text-slate-400">
-                      {source.document_title} · distance{" "}
-                      {source.cosine_distance.toFixed(4)}
+                      {source.document_title} ·{" "}
+                      {source.cosine_distance === null
+                        ? "lexical-only match"
+                        : `semantic distance ${source.cosine_distance.toFixed(4)}`}
                     </p>
                   </li>
                 ))}

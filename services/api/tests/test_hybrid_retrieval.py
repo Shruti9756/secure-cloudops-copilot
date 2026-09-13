@@ -117,6 +117,7 @@ def test_hybrid_retrieval_fuses_semantic_and_lexical_candidates(
 
     lexical_only_result = results[2]
     assert lexical_only_result.semantic_cosine_distance is None
+    assert lexical_only_result.cosine_distance is None
     assert lexical_only_result.bm25_score == 1.8
 
 

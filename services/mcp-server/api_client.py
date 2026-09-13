@@ -140,7 +140,7 @@ class ApiSource:
 
     source_identifier: str
     document_title: str
-    cosine_distance: float
+    cosine_distance: float | None
 
 
 @dataclass(frozen=True)
@@ -420,9 +420,16 @@ def _parse_source(raw_source: object) -> ApiSource:
     if not isinstance(raw_source, dict):
         raise SecureCloudOpsApiProtocolError("SecureCloudOps API returned a non-object source.")
 
-    raw_distance = raw_source.get("cosine_distance")
+    if "cosine_distance" not in raw_source:
+        raise SecureCloudOpsApiProtocolError(
+            "SecureCloudOps API did not return a cosine distance field."
+        )
 
-    if not isinstance(raw_distance, (int, float)) or isinstance(raw_distance, bool):
+    raw_distance = raw_source["cosine_distance"]
+
+    if raw_distance is not None and (
+        not isinstance(raw_distance, (int, float)) or isinstance(raw_distance, bool)
+    ):
         raise SecureCloudOpsApiProtocolError(
             "SecureCloudOps API returned an invalid cosine distance."
         )
@@ -430,7 +437,7 @@ def _parse_source(raw_source: object) -> ApiSource:
     return ApiSource(
         source_identifier=_required_string(raw_source, "source_identifier"),
         document_title=_required_string(raw_source, "document_title"),
-        cosine_distance=float(raw_distance),
+        cosine_distance=(float(raw_distance) if raw_distance is not None else None),
     )
 
 

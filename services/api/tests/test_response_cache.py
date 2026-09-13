@@ -73,7 +73,7 @@ def test_cache_key_is_tenant_scoped_and_does_not_expose_raw_question() -> None:
     assert cache_key != other_tenant_cache_key
     assert question not in cache_key
     assert cache_key != privileged_cache_key
-    assert "securecloudops:ask:v2:nimbuscart:" in cache_key
+    assert "securecloudops:ask:v3:nimbuscart:" in cache_key
 
 
 def test_load_cached_response_returns_valid_json_payload() -> None:

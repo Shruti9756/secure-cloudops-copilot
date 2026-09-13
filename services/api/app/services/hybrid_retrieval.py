@@ -41,6 +41,11 @@ class HybridRetrievedChunk:
     semantic_rank: int | None
     lexical_rank: int | None
 
+    @property
+    def cosine_distance(self) -> float | None:
+        """Return a real semantic distance, or None for a lexical-only match."""
+        return self.semantic_cosine_distance
+
 
 def retrieve_hybrid_chunks(
     session: Session,

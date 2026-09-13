@@ -9,7 +9,7 @@ from typing import Protocol
 from redis.exceptions import RedisError
 
 # Bump this version when the answer pipeline changes in a cache-incompatible way.
-ASK_RESPONSE_CACHE_KEY_VERSION = "v2"
+ASK_RESPONSE_CACHE_KEY_VERSION = "v3"
 
 # Short TTL limits how long an answer can remain stale after knowledge changes.
 ASK_RESPONSE_CACHE_TTL_SECONDS = 300

@@ -143,7 +143,7 @@ class RetrievedSourceResponse(BaseModel):
 
     source_identifier: str
     document_title: str
-    cosine_distance: float
+    cosine_distance: float | None
 
 
 class AskResponse(BaseModel):

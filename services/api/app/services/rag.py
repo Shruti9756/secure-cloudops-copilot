@@ -1,8 +1,9 @@
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.services.bm25 import tokenize_bm25
 from app.services.chat import ChatMessage, ChatProvider
 from app.services.citations import (
     CitationValidationResult,
@@ -14,6 +15,10 @@ from app.services.document_access import (
     DocumentAccessLevel,
 )
 from app.services.embeddings import EmbeddingProvider
+from app.services.hybrid_retrieval import (
+    HybridRetrievedChunk,
+    retrieve_hybrid_chunks,
+)
 from app.services.retrieval import (
     DEFAULT_RETRIEVAL_LIMIT,
     MAX_RETRIEVAL_LIMIT,
@@ -26,6 +31,8 @@ from app.services.structured_answer import (
     parse_structured_answer,
     render_answer_with_citations,
 )
+
+type GroundingChunk = RetrievedChunk | HybridRetrievedChunk
 
 CITATION_VALIDATION_FAILURE_MESSAGE = (
     "I couldn't safely return a grounded answer because the generated response did not "
@@ -83,7 +90,7 @@ class GroundedAnswer:
     query_input_token_count: int
     prompt_token_count: int | None
     completion_token_count: int | None
-    sources: tuple[RetrievedChunk, ...]
+    sources: tuple[GroundingChunk, ...]
     citation_validation: CitationValidationResult | None
     safety_validation: SafetyValidationResult | None
     structured_output_validation_passed: bool | None = None
@@ -125,18 +132,30 @@ def answer_grounded_question(
     # The question uses the same embedding model as the documents being searched.
     query_embedding = embedding_provider.embed(normalized_question)
 
-    retrieved_chunks = retrieve_relevant_chunks(
-        session=session,
-        tenant_slug=normalized_tenant_slug,
-        query_vector=query_embedding.vector,
-        # This prevents accidental comparison between different vector-model spaces.
-        embedding_model=query_embedding.model_id,
-        allowed_document_access_levels=allowed_document_access_levels,
-        limit=limit,
-    )
+    if tokenize_bm25(normalized_question):
+        retrieved_chunks: list[GroundingChunk] = retrieve_hybrid_chunks(
+            session=session,
+            tenant_slug=normalized_tenant_slug,
+            query=normalized_question,
+            query_vector=query_embedding.vector,
+            embedding_model=query_embedding.model_id,
+            allowed_document_access_levels=allowed_document_access_levels,
+            limit=limit,
+        )
+    else:
+        # BM25 currently recognizes Latin letters, numbers, and incident-style IDs.
+        # Preserve semantic retrieval for punctuation-only or non-Latin questions.
+        retrieved_chunks = retrieve_relevant_chunks(
+            session=session,
+            tenant_slug=normalized_tenant_slug,
+            query_vector=query_embedding.vector,
+            embedding_model=query_embedding.model_id,
+            allowed_document_access_levels=allowed_document_access_levels,
+            limit=limit,
+        )
 
     # Do not ask the LLM to invent an answer when the database has no evidence.
-    if not retrieved_chunks:
+    if not retrieved_chunks or not _has_semantic_anchor(retrieved_chunks):
         return GroundedAnswer(
             answer_text=INSUFFICIENT_EVIDENCE_MESSAGE,
             embedding_model=query_embedding.model_id,
@@ -225,9 +244,16 @@ def answer_grounded_question(
     )
 
 
+def _has_semantic_anchor(
+    retrieved_chunks: Sequence[GroundingChunk],
+) -> bool:
+    """Require at least one source that passed semantic relevance filtering."""
+    return any(chunk.cosine_distance is not None for chunk in retrieved_chunks)
+
+
 def build_grounded_messages(
     question: str,
-    retrieved_chunks: list[RetrievedChunk],
+    retrieved_chunks: Sequence[GroundingChunk],
 ) -> list[ChatMessage]:
     """Build a prompt that separates fixed rules from untrusted document text."""
     if not retrieved_chunks:
@@ -264,7 +290,7 @@ def build_grounded_messages(
     ]
 
 
-def _format_untrusted_evidence(chunk: RetrievedChunk) -> str:
+def _format_untrusted_evidence(chunk: GroundingChunk) -> str:
     """Label one chunk clearly so the model can cite its exact source."""
     source_identifier = source_identifier_for_chunk(chunk)
 

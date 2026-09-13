@@ -32,6 +32,7 @@ def test_reranker_promotes_exact_version_metadata() -> None:
     assert results[0].normalized_bm25_score == 1.0
     assert results[0].rerank_score > results[1].rerank_score
 
+
 def test_reranker_preserves_fusion_order_for_generic_query() -> None:
     results = rerank_candidates(
         "Why did checkout latency increase after the deployment?",
@@ -43,9 +44,7 @@ def test_reranker_preserves_fusion_order_for_generic_query() -> None:
             ),
             RerankingCandidate(
                 source_identifier="deployments/latest.md#chunk-0",
-                search_text=(
-                    "Why checkout latency increased after the deployment."
-                ),
+                search_text=("Why checkout latency increased after the deployment."),
                 base_score=0.0339,
             ),
         ),
@@ -53,10 +52,8 @@ def test_reranker_preserves_fusion_order_for_generic_query() -> None:
     )
 
     assert results[0].source_identifier == "runbooks/checkout.md#chunk-0"
-    assert all(
-        result.normalized_bm25_score == 0.0
-        for result in results
-    )
+    assert all(result.normalized_bm25_score == 0.0 for result in results)
+
 
 def test_reranker_keeps_stronger_base_score_when_text_scores_are_equal() -> None:
     results = rerank_candidates(

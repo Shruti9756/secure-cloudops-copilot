@@ -6,7 +6,9 @@ from uuid import uuid4
 import pytest
 
 from app.services.chat import ChatCompletion, ChatMessage
+from app.services.document_access import ALL_DOCUMENT_ACCESS_LEVELS
 from app.services.embeddings import EmbeddingResult
+from app.services.hybrid_retrieval import HybridRetrievedChunk
 from app.services.rag import (
     CITATION_VALIDATION_FAILURE_MESSAGE,
     INSUFFICIENT_EVIDENCE_MESSAGE,
@@ -76,6 +78,26 @@ def make_retrieval_row(
     )
 
 
+def make_hybrid_chunk(
+    *,
+    semantic_cosine_distance: float | None,
+) -> HybridRetrievedChunk:
+    """Create hybrid evidence with or without semantic corroboration."""
+    return HybridRetrievedChunk(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        source_path="deployments/checkout-2.4.0.md",
+        document_title="Deployment Record: checkout 2.4.0",
+        content="The idle timeout changed from 120 seconds to 5 seconds.",
+        chunk_index=0,
+        semantic_cosine_distance=semantic_cosine_distance,
+        bm25_score=2.4,
+        rrf_score=1 / 61,
+        semantic_rank=1 if semantic_cosine_distance is not None else None,
+        lexical_rank=1,
+    )
+
+
 def test_rag_builds_guarded_prompt_and_accepts_valid_citation() -> None:
     session = Mock()
     session.execute.return_value = [
@@ -120,6 +142,135 @@ def test_rag_builds_guarded_prompt_and_accepts_valid_citation() -> None:
     assert "exactly one short sentence" in system_message.content
     assert "preserve that uncertainty" in user_message.content
     assert "smallest set of sources" in user_message.content
+
+
+def test_rag_uses_hybrid_retrieval_with_the_authorized_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    embedding_provider = FakeEmbeddingProvider()
+    chat_provider = FakeChatProvider()
+    hybrid_chunk = make_hybrid_chunk(semantic_cosine_distance=0.12)
+
+    hybrid_retrieval = Mock(return_value=[hybrid_chunk])
+    semantic_retrieval = Mock()
+
+    monkeypatch.setattr(
+        "app.services.rag.retrieve_hybrid_chunks",
+        hybrid_retrieval,
+    )
+    monkeypatch.setattr(
+        "app.services.rag.retrieve_relevant_chunks",
+        semantic_retrieval,
+    )
+
+    result = answer_grounded_question(
+        session=session,
+        tenant_slug=" nimbuscart ",
+        question=" Why did checkout latency increase? ",
+        embedding_provider=embedding_provider,
+        chat_provider=chat_provider,
+        allowed_document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
+        limit=2,
+    )
+
+    hybrid_retrieval.assert_called_once_with(
+        session=session,
+        tenant_slug="nimbuscart",
+        query="Why did checkout latency increase?",
+        query_vector=[0.25] * TEST_EMBEDDING_DIMENSIONS,
+        embedding_model=TEST_EMBEDDING_MODEL,
+        allowed_document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
+        limit=2,
+    )
+    semantic_retrieval.assert_not_called()
+
+    assert result.sources == (hybrid_chunk,)
+    assert result.citation_validation is not None
+    assert result.citation_validation.is_valid is True
+
+
+def test_rag_abstains_when_hybrid_returns_only_lexical_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    embedding_provider = FakeEmbeddingProvider()
+    chat_provider = FakeChatProvider()
+    lexical_only_chunk = make_hybrid_chunk(
+        semantic_cosine_distance=None,
+    )
+
+    hybrid_retrieval = Mock(return_value=[lexical_only_chunk])
+    semantic_fallback = Mock()
+
+    monkeypatch.setattr(
+        "app.services.rag.retrieve_hybrid_chunks",
+        hybrid_retrieval,
+    )
+    monkeypatch.setattr(
+        "app.services.rag.retrieve_relevant_chunks",
+        semantic_fallback,
+    )
+
+    result = answer_grounded_question(
+        session=session,
+        tenant_slug="nimbuscart",
+        question="How many paid parental-leave weeks do employees receive?",
+        embedding_provider=embedding_provider,
+        chat_provider=chat_provider,
+    )
+
+    hybrid_retrieval.assert_called_once()
+    semantic_fallback.assert_not_called()
+
+    assert result.answer_text == INSUFFICIENT_EVIDENCE_MESSAGE
+    assert result.sources == ()
+    assert result.generation_model is None
+    assert result.citation_validation is None
+    assert result.safety_validation is None
+    assert chat_provider.message_batches == []
+
+
+def test_rag_falls_back_to_semantic_retrieval_for_a_non_lexical_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    embedding_provider = FakeEmbeddingProvider()
+    chat_provider = FakeChatProvider()
+
+    hybrid_retrieval = Mock()
+    semantic_retrieval = Mock(return_value=[])
+
+    monkeypatch.setattr(
+        "app.services.rag.retrieve_hybrid_chunks",
+        hybrid_retrieval,
+    )
+    monkeypatch.setattr(
+        "app.services.rag.retrieve_relevant_chunks",
+        semantic_retrieval,
+    )
+
+    result = answer_grounded_question(
+        session=session,
+        tenant_slug="nimbuscart",
+        question="障害の原因は？",
+        embedding_provider=embedding_provider,
+        chat_provider=chat_provider,
+        allowed_document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
+    )
+
+    hybrid_retrieval.assert_not_called()
+    semantic_retrieval.assert_called_once_with(
+        session=session,
+        tenant_slug="nimbuscart",
+        query_vector=[0.25] * TEST_EMBEDDING_DIMENSIONS,
+        embedding_model=TEST_EMBEDDING_MODEL,
+        allowed_document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
+        limit=3,
+    )
+
+    assert result.answer_text == INSUFFICIENT_EVIDENCE_MESSAGE
+    assert chat_provider.message_batches == []
 
 
 def test_rag_does_not_send_suspicious_evidence_to_chat_provider() -> None:

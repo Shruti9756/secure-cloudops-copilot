@@ -25,8 +25,9 @@ from app.services.document_access import (
     ALL_DOCUMENT_ACCESS_LEVELS,
     DEFAULT_DOCUMENT_ACCESS_LEVELS,
 )
+from app.services.hybrid_retrieval import HybridRetrievedChunk
 from app.services.metrics import METRICS_REGISTRY
-from app.services.rag import GroundedAnswer
+from app.services.rag import GroundedAnswer, GroundingChunk
 from app.services.response_cache import build_ask_response_cache_key
 from app.services.retrieval import RetrievedChunk
 from app.services.safety import SafetyValidationResult
@@ -122,7 +123,26 @@ def make_source() -> RetrievedChunk:
     )
 
 
-def make_grounded_answer() -> GroundedAnswer:
+def make_lexical_only_source() -> HybridRetrievedChunk:
+    """Create one source found only by lexical retrieval."""
+    return HybridRetrievedChunk(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        source_path="deployments/checkout-2.4.0.md",
+        document_title="Deployment Record: checkout 2.4.0",
+        content="The idle timeout changed from 120 seconds to 5 seconds.",
+        chunk_index=0,
+        semantic_cosine_distance=None,
+        bm25_score=2.4,
+        rrf_score=1 / 61,
+        semantic_rank=None,
+        lexical_rank=1,
+    )
+
+
+def make_grounded_answer(
+    source: GroundingChunk | None = None,
+) -> GroundedAnswer:
     """Create a valid internal RAG result for endpoint-response testing."""
     return GroundedAnswer(
         answer_text=(
@@ -134,7 +154,7 @@ def make_grounded_answer() -> GroundedAnswer:
         query_input_token_count=10,
         prompt_token_count=50,
         completion_token_count=20,
-        sources=(make_source(),),
+        sources=(source if source is not None else make_source(),),
         structured_output_validation_passed=True,
         structured_output_validation_errors=(),
         citation_validation=CitationValidationResult(
@@ -441,8 +461,7 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 ) -> None:
     cache = FakeRedisCache()
     question = "Why did checkout latency increase?"
-    rag_call = Mock(return_value=make_grounded_answer())
-
+    rag_call = Mock(return_value=make_grounded_answer(make_lexical_only_source()))
     install_fake_dependencies(redis_cache=cache)
     monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
 
@@ -467,6 +486,7 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 
     assert first_response.status_code == 200
     assert first_response.headers["x-cache"] == "MISS"
+    assert first_response.json()["sources"][0]["cosine_distance"] is None
     assert expected_cache_key in cache.entries
 
     assert second_response.status_code == 200
