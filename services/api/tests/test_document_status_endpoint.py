@@ -55,6 +55,12 @@ def test_list_document_statuses_returns_safe_tenant_scoped_lifecycle_data() -> N
             title="Checkout Latency Investigation",
             ingestion_status="embedded",
         ),
+        make_document(
+            tenant_id=tenant.id,
+            source_path="uploads/failed-document.md",
+            title="Failed Document",
+            ingestion_status="failed",
+        ),
     ]
     app.dependency_overrides[get_database_session] = lambda: session
     app.dependency_overrides[get_authorized_knowledge_access] = lambda: AuthorizedTenant(
@@ -81,6 +87,11 @@ def test_list_document_statuses_returns_safe_tenant_scoped_lifecycle_data() -> N
                 "source_path": "runbooks/checkout-latency.md",
                 "title": "Checkout Latency Investigation",
                 "ingestion_status": "embedded",
+            },
+            {
+                "source_path": "uploads/failed-document.md",
+                "title": "Failed Document",
+                "ingestion_status": "failed",
             },
         ],
     }

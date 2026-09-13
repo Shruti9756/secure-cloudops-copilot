@@ -99,6 +99,9 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
     assert isinstance(stored_document, KnowledgeDocument)
     assert stored_document.access_level == "organization"
     assert stored_document.organization_id == tenant.organization_id
+    assert stored_document.processing_attempt_count == 0
+    assert stored_document.next_processing_attempt_at is None
+    assert stored_document.last_processing_failure_reason is None
     assert stored_document.title == "Checkout Runbook"
     assert stored_document.content == (
         "# Checkout Runbook\n\n"
@@ -256,3 +259,49 @@ def test_ingest_document_updates_access_level_without_reprocessing_same_content(
     assert existing_document.access_level == RESTRICTED_DOCUMENT_ACCESS
     assert existing_document.ingestion_status == "embedded"
     session.add.assert_not_called()
+
+
+def test_ingest_document_resets_retry_state_when_content_changes() -> None:
+    """New content receives a fresh processing and retry lifecycle."""
+    session = Mock()
+    organization_id = uuid4()
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=organization_id,
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    old_content = "# Old Runbook\n\nOld investigation steps."
+    new_content = "# Updated Runbook\n\nNew investigation steps."
+
+    existing_document = KnowledgeDocument(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        organization_id=organization_id,
+        title="Old Runbook",
+        source_path="runbooks/retry-demo.md",
+        source_sha256=calculate_content_sha256(old_content),
+        content=old_content,
+        ingestion_status="failed",
+        processing_attempt_count=5,
+        next_processing_attempt_at=None,
+        last_processing_failure_reason="provider_unavailable",
+        access_level="organization",
+        document_metadata={},
+    )
+    session.scalar.return_value = existing_document
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="runbooks/retry-demo.md",
+        content=new_content,
+    )
+
+    assert result.action == "updated"
+    assert existing_document.content == new_content
+    assert existing_document.source_sha256 == calculate_content_sha256(new_content)
+    assert existing_document.ingestion_status == "pending"
+    assert existing_document.processing_attempt_count == 0
+    assert existing_document.next_processing_attempt_at is None
+    assert existing_document.last_processing_failure_reason is None

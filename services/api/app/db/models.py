@@ -160,6 +160,14 @@ class KnowledgeDocument(Base):
             "access_level IN ('organization', 'restricted')",
             name="ck_knowledge_documents_access_level",
         ),
+        CheckConstraint(
+            "ingestion_status IN ('pending', 'chunked', 'embedded', 'failed')",
+            name="ck_knowledge_documents_ingestion_status",
+        ),
+        CheckConstraint(
+            "processing_attempt_count >= 0",
+            name="ck_knowledge_documents_processing_attempt_count_nonnegative",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -184,6 +192,19 @@ class KnowledgeDocument(Base):
         String(32),
         server_default="pending",
         nullable=False,
+    )
+    processing_attempt_count: Mapped[int] = mapped_column(
+        Integer,
+        server_default="0",
+        nullable=False,
+    )
+    next_processing_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_processing_failure_reason: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
     )
     access_level: Mapped[str] = mapped_column(
         String(32),

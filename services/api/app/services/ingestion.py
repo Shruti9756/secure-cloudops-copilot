@@ -159,6 +159,9 @@ def ingest_document(
                 source_sha256=content_hash,
                 content=safe_content,
                 ingestion_status="pending",
+                processing_attempt_count=0,
+                next_processing_attempt_at=None,
+                last_processing_failure_reason=None,
                 access_level=resolved_access_level,
                 document_metadata=document_metadata,
             )
@@ -175,6 +178,9 @@ def ingest_document(
     # Existing chunks describe older content and must not be retrieved after an update.
     document.chunks.clear()
     document.ingestion_status = "pending"
+    document.processing_attempt_count = 0
+    document.next_processing_attempt_at = None
+    document.last_processing_failure_reason = None
     document.document_metadata = document_metadata
 
     return IngestionResult(action="updated", source_path=source_path)

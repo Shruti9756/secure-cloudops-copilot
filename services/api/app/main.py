@@ -188,7 +188,7 @@ class DocumentStatusItemResponse(BaseModel):
 
     source_path: str
     title: str
-    ingestion_status: Literal["pending", "chunked", "embedded"]
+    ingestion_status: Literal["pending", "chunked", "embedded", "failed"]
 
 
 class DocumentStatusListResponse(BaseModel):
