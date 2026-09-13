@@ -7,6 +7,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.db.models import KnowledgeDocument
 from app.services.chunking import ChunkingResult
+from app.services.document_lock import DocumentLockLease
 from app.services.embedding_persistence import DocumentEmbeddingResult
 from app.worker import (
     EMPTY_PROCESSING_CYCLE_RESULT,
@@ -242,6 +243,7 @@ def test_process_next_document_skips_a_row_locked_by_another_worker(
         tenant_slug="nimbuscart",
         provider=provider,
         available_at=AVAILABLE_AT,
+        redis_client=Mock(),
     )
 
     assert result is None
@@ -253,6 +255,95 @@ def test_process_next_document_skips_a_row_locked_by_another_worker(
     )
     session.begin_nested.assert_not_called()
     process_claimed_document.assert_not_called()
+
+
+def test_process_next_document_skips_when_redis_lock_is_held(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock()
+    session_factory = MagicMock()
+    session_factory.begin.return_value.__enter__.return_value = session
+    provider = Mock()
+    redis_client = Mock()
+    document = make_document()
+
+    monkeypatch.setattr(
+        "app.worker.claim_next_document",
+        Mock(return_value=document),
+    )
+    monkeypatch.setattr(
+        "app.worker.acquire_document_lock",
+        Mock(return_value=None),
+    )
+
+    process_claimed_document = Mock()
+    record_failure = Mock()
+    monkeypatch.setattr("app.worker.process_document", process_claimed_document)
+    monkeypatch.setattr("app.worker.record_processing_failure", record_failure)
+
+    result = process_next_document(
+        session_factory=session_factory,
+        tenant_slug="nimbuscart",
+        provider=provider,
+        redis_client=redis_client,
+        available_at=AVAILABLE_AT,
+    )
+
+    assert result is None
+    process_claimed_document.assert_not_called()
+    record_failure.assert_not_called()
+
+
+def test_process_next_document_releases_redis_lock_after_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock()
+    session_factory = MagicMock()
+    session_factory.begin.return_value.__enter__.return_value = session
+    provider = Mock()
+    redis_client = Mock()
+    document = make_document()
+
+    lease = DocumentLockLease(
+        key="document-lock",
+        owner_token="worker-token",
+        ttl_seconds=120,
+    )
+
+    result_value = ProcessingCycleResult(
+        chunked_documents=1,
+        chunks_created=1,
+        embedded_documents=1,
+        embedded_chunks=1,
+        skipped_chunks=0,
+        input_tokens=10,
+    )
+
+    acquire_lock = Mock(return_value=lease)
+    release_lock = Mock(return_value=True)
+
+    monkeypatch.setattr("app.worker.claim_next_document", Mock(return_value=document))
+    monkeypatch.setattr("app.worker.acquire_document_lock", acquire_lock)
+    monkeypatch.setattr("app.worker.release_document_lock", release_lock)
+    monkeypatch.setattr(
+        "app.worker.process_document",
+        Mock(return_value=result_value),
+    )
+
+    result = process_next_document(
+        session_factory=session_factory,
+        tenant_slug="nimbuscart",
+        provider=provider,
+        redis_client=redis_client,
+        available_at=AVAILABLE_AT,
+    )
+
+    assert result == result_value
+    acquire_lock.assert_called_once_with(
+        redis_client,
+        document_id=document.id,
+    )
+    release_lock.assert_called_once_with(redis_client, lease)
 
 
 @pytest.mark.parametrize(
@@ -298,6 +389,7 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
         tenant_slug="nimbuscart",
         provider=provider,
         available_at=AVAILABLE_AT,
+        redis_client=Mock(),
     )
 
     assert result == EMPTY_PROCESSING_CYCLE_RESULT
@@ -333,6 +425,7 @@ def test_process_one_cycle_continues_after_one_document_failure(
 ) -> None:
     session_factory = MagicMock()
     provider = Mock()
+    redis_client = Mock()
 
     successful_result = ProcessingCycleResult(
         chunked_documents=1,
@@ -358,6 +451,7 @@ def test_process_one_cycle_continues_after_one_document_failure(
         session_factory=session_factory,
         tenant_slug=" nimbuscart ",
         provider=provider,
+        redis_client=redis_client,
     )
 
     assert result == successful_result
@@ -367,18 +461,21 @@ def test_process_one_cycle_continues_after_one_document_failure(
                 session_factory=session_factory,
                 tenant_slug="nimbuscart",
                 provider=provider,
+                redis_client=redis_client,
                 available_at=AVAILABLE_AT,
             ),
             call(
                 session_factory=session_factory,
                 tenant_slug="nimbuscart",
                 provider=provider,
+                redis_client=redis_client,
                 available_at=AVAILABLE_AT,
             ),
             call(
                 session_factory=session_factory,
                 tenant_slug="nimbuscart",
                 provider=provider,
+                redis_client=redis_client,
                 available_at=AVAILABLE_AT,
             ),
         ]
@@ -392,6 +489,7 @@ def test_process_all_tenant_documents_aggregates_tenant_results(
     session_factory = MagicMock()
     session_factory.return_value.__enter__.return_value = discovery_session
     provider = Mock()
+    redis_client = Mock()
 
     first_result = ProcessingCycleResult(
         chunked_documents=1,
@@ -423,6 +521,7 @@ def test_process_all_tenant_documents_aggregates_tenant_results(
     result = process_all_tenant_documents(
         session_factory=session_factory,
         provider=provider,
+        redis_client=redis_client,
     )
 
     assert result == ProcessingCycleResult(
@@ -443,11 +542,13 @@ def test_process_all_tenant_documents_aggregates_tenant_results(
                 session_factory=session_factory,
                 tenant_slug="nimbuscart",
                 provider=provider,
+                redis_client=redis_client,
             ),
             call(
                 session_factory=session_factory,
                 tenant_slug="skyforge",
                 provider=provider,
+                redis_client=redis_client,
             ),
         ]
     )
@@ -460,6 +561,7 @@ def test_process_all_tenant_documents_continues_after_one_tenant_failure(
     session_factory = MagicMock()
     session_factory.return_value.__enter__.return_value = discovery_session
     provider = Mock()
+    redis_client = Mock()
 
     successful_result = ProcessingCycleResult(
         chunked_documents=1,
@@ -487,6 +589,7 @@ def test_process_all_tenant_documents_continues_after_one_tenant_failure(
     result = process_all_tenant_documents(
         session_factory=session_factory,
         provider=provider,
+        redis_client=redis_client,
     )
 
     assert result == successful_result
@@ -496,11 +599,13 @@ def test_process_all_tenant_documents_continues_after_one_tenant_failure(
                 session_factory=session_factory,
                 tenant_slug="nimbuscart",
                 provider=provider,
+                redis_client=redis_client,
             ),
             call(
                 session_factory=session_factory,
                 tenant_slug="skyforge",
                 provider=provider,
+                redis_client=redis_client,
             ),
         ]
     )

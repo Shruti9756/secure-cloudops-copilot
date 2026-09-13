@@ -94,6 +94,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     # The shared API Dockerfile checks port 8000; a worker intentionally exposes no HTTP port.
     healthcheck:
       disable: true

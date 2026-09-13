@@ -12,7 +12,14 @@ from app.core.config import get_settings
 from app.db.models import KnowledgeDocument, Tenant
 from app.db.session import get_session_factory
 from app.infrastructure.ollama import OllamaEmbeddingClient
+from app.infrastructure.redis import get_redis_client
 from app.services.chunking import replace_document_chunks
+from app.services.document_lock import (
+    DocumentLockClient,
+    DocumentLockUnavailable,
+    acquire_document_lock,
+    release_document_lock,
+)
 from app.services.document_retry import (
     DEFAULT_PROCESSING_MAX_ATTEMPTS,
     PROCESSABLE_DOCUMENT_STATUSES,
@@ -184,9 +191,10 @@ def process_next_document(
     session_factory: sessionmaker[Session],
     tenant_slug: str,
     provider: EmbeddingProvider,
+    redis_client: DocumentLockClient,
     available_at: datetime,
 ) -> ProcessingCycleResult | None:
-    """Claim and process one due document without affecting sibling documents."""
+    """Claim and process one due document with PostgreSQL and Redis locks."""
     normalized_tenant_slug = _normalize_tenant_slug(tenant_slug)
 
     with session_factory.begin() as session:
@@ -200,40 +208,75 @@ def process_next_document(
             return None
 
         try:
-            # PostgreSQL implements SQLAlchemy's nested transaction as a SAVEPOINT.
-            with session.begin_nested():
-                result = process_document(
-                    session=session,
-                    document=document,
-                    provider=provider,
-                )
-        except Exception as error:  # noqa: BLE001
-            # The savepoint has rolled back document processing, while the outer
-            # transaction still owns the document's row lock.
-            session.refresh(document)
-
-            failure_reason = classify_processing_failure(error)
-            retry_scheduled = record_processing_failure(
-                document,
-                failure_reason=failure_reason,
-                occurred_at=_utc_now(),
+            lease = acquire_document_lock(
+                redis_client,
+                document_id=document.id,
             )
-            session.flush()
-
-            LOGGER.warning(
-                "Document processing attempt failed: "
-                "tenant=%s document_id=%s failure_reason=%s retry_scheduled=%s",
+        except DocumentLockUnavailable:
+            LOGGER.exception(
+                "Document processing skipped because Redis lock is unavailable: "
+                "tenant=%s document_id=%s",
                 normalized_tenant_slug,
                 document.id,
-                failure_reason,
-                retry_scheduled,
             )
+            return None
 
-            # Returning normally commits only the failure/retry state.
-            return EMPTY_PROCESSING_CYCLE_RESULT
+        if lease is None:
+            LOGGER.info(
+                "Document processing skipped because another worker owns the lock: "
+                "tenant=%s document_id=%s",
+                normalized_tenant_slug,
+                document.id,
+            )
+            return None
 
-        # Returning normally commits the successfully processed document.
-        return result
+        try:
+            try:
+                with session.begin_nested():
+                    result = process_document(
+                        session=session,
+                        document=document,
+                        provider=provider,
+                    )
+            except Exception as error:  # noqa: BLE001
+                session.refresh(document)
+
+                failure_reason = classify_processing_failure(error)
+                retry_scheduled = record_processing_failure(
+                    document,
+                    failure_reason=failure_reason,
+                    occurred_at=_utc_now(),
+                )
+                session.flush()
+
+                LOGGER.warning(
+                    "Document processing attempt failed: "
+                    "tenant=%s document_id=%s failure_reason=%s retry_scheduled=%s",
+                    normalized_tenant_slug,
+                    document.id,
+                    failure_reason,
+                    retry_scheduled,
+                )
+
+                return EMPTY_PROCESSING_CYCLE_RESULT
+
+            return result
+        finally:
+            try:
+                released = release_document_lock(redis_client, lease)
+            except DocumentLockUnavailable:
+                LOGGER.exception(
+                    "Document lock could not be released: tenant=%s document_id=%s",
+                    normalized_tenant_slug,
+                    document.id,
+                )
+            else:
+                if not released:
+                    LOGGER.warning(
+                        "Document lock ownership was lost before release: tenant=%s document_id=%s",
+                        normalized_tenant_slug,
+                        document.id,
+                    )
 
 
 def process_one_cycle(
@@ -241,6 +284,7 @@ def process_one_cycle(
     session_factory: sessionmaker[Session],
     tenant_slug: str,
     provider: EmbeddingProvider,
+    redis_client: DocumentLockClient,
 ) -> ProcessingCycleResult:
     """Process each currently due document in its own transaction."""
     normalized_tenant_slug = _normalize_tenant_slug(tenant_slug)
@@ -253,6 +297,7 @@ def process_one_cycle(
             tenant_slug=normalized_tenant_slug,
             provider=provider,
             available_at=available_at,
+            redis_client=redis_client,
         )
 
         if result is None:
@@ -267,6 +312,7 @@ def process_all_tenant_documents(
     *,
     session_factory: sessionmaker[Session],
     provider: EmbeddingProvider,
+    redis_client: DocumentLockClient,
 ) -> ProcessingCycleResult:
     """Process all tenants while isolating each individual document attempt."""
     available_at = _utc_now()
@@ -286,6 +332,7 @@ def process_all_tenant_documents(
                     session_factory=session_factory,
                     tenant_slug=tenant_slug,
                     provider=provider,
+                    redis_client=redis_client,
                 )
             )
         except Exception:
@@ -309,6 +356,7 @@ def main() -> None:
 
     settings = get_settings()
     session_factory = get_session_factory()
+    redis_client = get_redis_client()
     provider = OllamaEmbeddingClient()
     tenant_scope = settings.document_processor_tenant_slug
 
@@ -325,14 +373,14 @@ def main() -> None:
         try:
             if tenant_scope is None:
                 result = process_all_tenant_documents(
-                    session_factory=session_factory,
-                    provider=provider,
+                    session_factory=session_factory, provider=provider, redis_client=redis_client
                 )
             else:
                 result = process_one_cycle(
                     session_factory=session_factory,
                     tenant_slug=tenant_scope,
                     provider=provider,
+                    redis_client=redis_client,
                 )
         except Exception:
             LOGGER.exception("Document processing cycle failed; it will retry later")
