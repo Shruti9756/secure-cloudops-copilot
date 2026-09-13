@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from typing import Literal
+from urllib.error import URLError
 
 from app.db.models import KnowledgeDocument
 
@@ -22,6 +23,17 @@ ALLOWED_PROCESSING_FAILURE_REASONS = frozenset(
         "unexpected_error",
     }
 )
+
+
+def classify_processing_failure(
+    error: Exception,
+) -> DocumentProcessingFailureReason:
+    """Convert a raw processing exception into a safe persisted reason."""
+    if isinstance(error, (TimeoutError, ConnectionError, URLError)):
+        return "provider_unavailable"
+
+    return "unexpected_error"
+
 
 PROCESSABLE_DOCUMENT_STATUSES = frozenset({"pending", "chunked"})
 

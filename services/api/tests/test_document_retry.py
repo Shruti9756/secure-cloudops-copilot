@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from urllib.error import URLError
 from uuid import uuid4
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from app.db.models import KnowledgeDocument
 from app.services.document_retry import (
     calculate_retry_delay_seconds,
+    classify_processing_failure,
     clear_processing_failure,
     record_processing_failure,
 )
@@ -31,6 +33,26 @@ def make_document(
         access_level="organization",
         document_metadata={},
     )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("request timed out"),
+        ConnectionError("connection refused"),
+        URLError("provider unavailable"),
+    ],
+)
+def test_classify_processing_failure_maps_connection_errors_to_provider_unavailable(
+    error: Exception,
+) -> None:
+    assert classify_processing_failure(error) == "provider_unavailable"
+
+
+def test_classify_processing_failure_uses_a_safe_code_for_unexpected_errors() -> None:
+    error = ValueError("raw details must not be persisted")
+
+    assert classify_processing_failure(error) == "unexpected_error"
 
 
 @pytest.mark.parametrize(
