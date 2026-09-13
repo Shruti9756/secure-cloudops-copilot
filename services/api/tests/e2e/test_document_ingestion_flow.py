@@ -80,6 +80,7 @@ def test_upload_worker_embedding_and_tenant_scoped_retrieval_flow() -> None:
     # Upload and worker status use the actual public HTTP API.
     with httpx.Client(
         base_url=API_BASE_URL,
+        headers={"X-Workspace-Slug": "nimbuscart"},
         timeout=httpx.Timeout(timeout=30.0, connect=5.0),
     ) as client:
         readiness_response = client.get("/ready")
