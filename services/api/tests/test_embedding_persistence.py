@@ -87,8 +87,25 @@ def test_embed_document_chunks_persists_missing_vectors() -> None:
     session.flush.assert_called_once()
 
 
+def test_embed_document_chunks_calls_heartbeat_before_each_missing_vector() -> None:
+    session = Mock()
+    provider = FakeEmbeddingProvider()
+    heartbeat = Mock()
+    document = make_document()
+
+    embed_document_chunks(
+        session=session,
+        document=document,
+        provider=provider,
+        before_embed=heartbeat,
+    )
+
+    assert heartbeat.call_count == 2
+
+
 def test_embed_document_chunks_skips_existing_vectors_on_rerun() -> None:
     session = Mock()
+    heartbeat = Mock()
     provider = FakeEmbeddingProvider()
     document = make_document()
     existing_chunk = document.chunks[0]
@@ -101,6 +118,7 @@ def test_embed_document_chunks_skips_existing_vectors_on_rerun() -> None:
         session=session,
         document=document,
         provider=provider,
+        before_embed=heartbeat,
     )
 
     assert provider.texts == ["Chunk 1 about checkout latency."]
@@ -109,11 +127,13 @@ def test_embed_document_chunks_skips_existing_vectors_on_rerun() -> None:
     assert result.total_input_tokens == 7
     assert existing_chunk.embedding_model == "previous-provider-v1"
     assert document.ingestion_status == "embedded"
+    assert heartbeat.call_count == 1
     session.flush.assert_called_once()
 
 
 def test_embed_document_chunks_requires_chunked_document() -> None:
     session = Mock()
+    heartbeat = Mock()
     provider = FakeEmbeddingProvider()
     document = make_document(ingestion_status="pending")
 
@@ -122,14 +142,17 @@ def test_embed_document_chunks_requires_chunked_document() -> None:
             session=session,
             document=document,
             provider=provider,
+            before_embed=heartbeat,
         )
 
     assert provider.texts == []
+    assert heartbeat.call_count == 0
     session.flush.assert_not_called()
 
 
 def test_embed_document_chunks_requires_at_least_one_chunk() -> None:
     session = Mock()
+    heartbeat = Mock()
     provider = FakeEmbeddingProvider()
     document = make_document(chunk_count=0)
 
@@ -138,7 +161,9 @@ def test_embed_document_chunks_requires_at_least_one_chunk() -> None:
             session=session,
             document=document,
             provider=provider,
+            before_embed=heartbeat,
         )
 
     assert provider.texts == []
+    assert heartbeat.call_count == 0
     session.flush.assert_not_called()

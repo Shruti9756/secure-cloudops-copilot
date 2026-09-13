@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -26,6 +27,7 @@ def embed_document_chunks(
     session: Session,
     document: KnowledgeDocument,
     provider: EmbeddingProvider,
+    before_embed: Callable[[], None] | None = None,
 ) -> DocumentEmbeddingResult:
     """Embed each missing chunk for one document inside the caller's transaction.
 
@@ -51,6 +53,8 @@ def embed_document_chunks(
             skipped_chunk_count += 1
             continue
 
+        if before_embed is not None:
+            before_embed()
         result = provider.embed(chunk.content)
 
         # These fields come from one provider response and must be stored together.

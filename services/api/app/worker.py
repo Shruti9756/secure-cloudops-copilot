@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -16,9 +17,11 @@ from app.infrastructure.redis import get_redis_client
 from app.services.chunking import replace_document_chunks
 from app.services.document_lock import (
     DocumentLockClient,
+    DocumentLockLost,
     DocumentLockUnavailable,
     acquire_document_lock,
     release_document_lock,
+    renew_document_lock,
 )
 from app.services.document_retry import (
     DEFAULT_PROCESSING_MAX_ATTEMPTS,
@@ -147,6 +150,7 @@ def process_document(
     session: Session,
     document: KnowledgeDocument,
     provider: EmbeddingProvider,
+    lock_heartbeat: Callable[[], None] | None = None,
 ) -> ProcessingCycleResult:
     """Chunk and embed exactly one document inside the active savepoint."""
     chunked_documents = 0
@@ -167,11 +171,19 @@ def process_document(
     elif document.ingestion_status != "chunked":
         raise ValueError("Document must be pending or chunked before processing")
 
-    embedding_result = embed_document_chunks(
-        session=session,
-        document=document,
-        provider=provider,
-    )
+    if lock_heartbeat is None:
+        embedding_result = embed_document_chunks(
+            session=session,
+            document=document,
+            provider=provider,
+        )
+    else:
+        embedding_result = embed_document_chunks(
+            session=session,
+            document=document,
+            provider=provider,
+            before_embed=lock_heartbeat,
+        )
 
     # A successful complete embedding invalidates old consecutive-failure state.
     clear_processing_failure(document)
@@ -230,14 +242,33 @@ def process_next_document(
             )
             return None
 
+        def renew_lock() -> None:
+            if not renew_document_lock(redis_client, lease):
+                raise DocumentLockLost(
+                    f"Document lock ownership was lost for document {document.id}"
+                )
+
         try:
             try:
                 with session.begin_nested():
+                    renew_lock()
+
                     result = process_document(
                         session=session,
                         document=document,
                         provider=provider,
+                        lock_heartbeat=renew_lock,
                     )
+
+                    renew_lock()
+            except DocumentLockLost, DocumentLockUnavailable:
+                LOGGER.warning(
+                    "Document processing stopped because lock ownership was lost: "
+                    "tenant=%s document_id=%s",
+                    normalized_tenant_slug,
+                    document.id,
+                )
+                return None
             except Exception as error:  # noqa: BLE001
                 session.refresh(document)
 

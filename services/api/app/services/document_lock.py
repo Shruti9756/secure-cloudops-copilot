@@ -50,6 +50,10 @@ class DocumentLockUnavailable(RuntimeError):
     """Raised when Redis cannot perform a lock operation."""
 
 
+class DocumentLockLost(RuntimeError):
+    """Raised when the worker no longer owns the document lock."""
+
+
 @dataclass(frozen=True)
 class DocumentLockLease:
     """The key and unique token owned by one worker."""

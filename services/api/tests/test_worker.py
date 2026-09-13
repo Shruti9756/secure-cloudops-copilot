@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import ANY, MagicMock, Mock, call
 from uuid import uuid4
 
 import pytest
@@ -302,6 +302,7 @@ def test_process_next_document_releases_redis_lock_after_success(
     session_factory.begin.return_value.__enter__.return_value = session
     provider = Mock()
     redis_client = Mock()
+    redis_client.eval.return_value = 1
     document = make_document()
 
     lease = DocumentLockLease(
@@ -384,12 +385,15 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
     monkeypatch.setattr("app.worker.process_document", process_claimed_document)
     monkeypatch.setattr("app.worker._utc_now", Mock(return_value=FAILURE_AT))
 
+    redis_client = Mock()
+    redis_client.eval.return_value = 1
+
     result = process_next_document(
         session_factory=session_factory,
         tenant_slug="nimbuscart",
         provider=provider,
         available_at=AVAILABLE_AT,
-        redis_client=Mock(),
+        redis_client=redis_client,
     )
 
     assert result == EMPTY_PROCESSING_CYCLE_RESULT
@@ -403,6 +407,7 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
         session=session,
         document=document,
         provider=provider,
+        lock_heartbeat=ANY,
     )
 
     # The processing exception reached the savepoint, so it rolled back.
