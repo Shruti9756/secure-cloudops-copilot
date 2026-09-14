@@ -122,6 +122,15 @@ def clear_processing_failure(document: KnowledgeDocument) -> None:
     document.last_processing_failure_reason = None
 
 
+def reset_failed_document_for_retry(document: KnowledgeDocument) -> None:
+    """Put one exhausted document back into the worker queue."""
+    if document.ingestion_status != "failed":
+        raise ValueError("Only failed documents can be retried")
+
+    document.ingestion_status = "pending"
+    clear_processing_failure(document)
+
+
 def _require_positive_integer(value: int, *, name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")

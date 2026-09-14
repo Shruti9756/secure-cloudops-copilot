@@ -10,6 +10,7 @@ from app.services.document_retry import (
     classify_processing_failure,
     clear_processing_failure,
     record_processing_failure,
+    reset_failed_document_for_retry,
 )
 
 
@@ -169,3 +170,36 @@ def test_clear_processing_failure_resets_retry_metadata() -> None:
     assert document.next_processing_attempt_at is None
     assert document.last_processing_failure_reason is None
     assert document.ingestion_status == "chunked"
+
+
+def test_reset_failed_document_for_retry_requeues_and_clears_failure_state() -> None:
+    document = make_document(
+        ingestion_status="failed",
+        processing_attempt_count=5,
+    )
+    document.next_processing_attempt_at = datetime(
+        2026,
+        9,
+        13,
+        12,
+        1,
+        tzinfo=UTC,
+    )
+    document.last_processing_failure_reason = "provider_unavailable"
+
+    reset_failed_document_for_retry(document)
+
+    assert document.ingestion_status == "pending"
+    assert document.processing_attempt_count == 0
+    assert document.next_processing_attempt_at is None
+    assert document.last_processing_failure_reason is None
+
+
+@pytest.mark.parametrize("status", ["pending", "chunked", "embedded"])
+def test_reset_failed_document_for_retry_rejects_non_failed_documents(
+    status: str,
+) -> None:
+    document = make_document(ingestion_status=status)
+
+    with pytest.raises(ValueError, match="Only failed documents"):
+        reset_failed_document_for_retry(document)

@@ -68,3 +68,52 @@ def test_engineer_cannot_upload_documents() -> None:
         "permission": "documents:write",
     }
     session.commit.assert_called_once_with()
+
+
+def test_engineer_cannot_retry_failed_documents() -> None:
+    session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    principal = AuthenticatedPrincipal(
+        user_id=uuid4(),
+        identity_subject="read-only-engineer",
+        display_name="Read Only Engineer",
+    )
+    membership = Membership(
+        organization_id=tenant.organization_id,
+        user_id=principal.user_id,
+        role="engineer",
+    )
+
+    session.scalar.side_effect = [tenant, membership]
+    app.dependency_overrides[get_database_session] = lambda: session
+    app.dependency_overrides[get_current_principal] = lambda: principal
+
+    try:
+        response = client.post(
+            "/api/v1/documents/retry",
+            params={"source_path": "uploads/failed-document.md"},
+            headers={"X-Workspace-Slug": "nimbuscart"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    audit_event = session.add.call_args.args[0]
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Requested tenant workspace was not found.",
+    }
+    assert audit_event.tenant_id is None
+    assert audit_event.organization_id is None
+    assert audit_event.event_type == "authorization.workspace_access"
+    assert audit_event.outcome == "denied"
+    assert audit_event.event_metadata == {
+        "authorization_status": "workspace_access_denied",
+        "permission": "documents:write",
+    }
+    session.commit.assert_called_once_with()

@@ -44,6 +44,14 @@ type DocumentUploadResponse = {
   source_path: string;
 };
 
+type DocumentRetryResponse = {
+  status: "accepted";
+  action: "retry_scheduled";
+  tenant: string;
+  source_path: string;
+  ingestion_status: "pending";
+};
+
 type DocumentDownloadResponse = {
   source_path: string;
   download_url: string;
@@ -129,6 +137,11 @@ export function DocumentManagement() {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloadingSourcePath, setDownloadingSourcePath] =
     useState<string | null>(null);
+  const [retryingSourcePath, setRetryingSourcePath] =
+    useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [retryResult, setRetryResult] =
+    useState<DocumentRetryResponse | null>(null);
   const [hasLoadedDocuments, setHasLoadedDocuments] = useState(false);
 
   async function loadDocumentStatuses() {
@@ -251,6 +264,50 @@ export function DocumentManagement() {
       );
     } finally {
       setIsUploading(false);
+    }
+  }
+  async function retryDocument(sourcePath: string) {
+    if (!canUploadDocuments) {
+      setRetryError(
+        "Only workspace administrators and managers may retry documents.",
+      );
+      return;
+    }
+
+    setRetryingSourcePath(sourcePath);
+    setRetryError(null);
+    setRetryResult(null);
+
+    try {
+      const requestUrl = new URL(
+        "/api/v1/documents/retry",
+        API_BASE_URL,
+      );
+      requestUrl.searchParams.set("source_path", sourcePath);
+
+      const response = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          ...getApiAuthorizationHeaders(),
+          ...getApiWorkspaceHeaders(),
+        },
+      });
+      const payload: unknown = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(payload));
+      }
+
+      setRetryResult(payload as DocumentRetryResponse);
+      await loadDocumentStatuses();
+    } catch (caughtError) {
+      setRetryError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to retry the document.",
+      );
+    } finally {
+      setRetryingSourcePath(null);
     }
   }
   async function prepareDocumentDownload(sourcePath: string) {
@@ -401,6 +458,24 @@ text, validates it, and redacts secrets before storage.
         </p>
       ) : null}
 
+      {retryError ? (
+        <p
+          className="mt-4 rounded-lg border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200"
+          role="alert"
+        >
+          Unable to retry document: {retryError}
+        </p>
+      ) : null}
+
+      {retryResult ? (
+        <p
+          className="mt-4 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-sm text-emerald-200"
+          role="status"
+        >
+          Retry accepted for {retryResult.source_path}. Processing is pending.
+        </p>
+      ) : null}
+
       {statusError ? (
         <p
           className="mt-4 rounded-lg border border-rose-400/30 bg-rose-400/10 p-3 text-sm text-rose-200"
@@ -502,6 +577,18 @@ text, validates it, and redacts secrets before storage.
                         ? "Preparing..."
                         : "Get secure link"}
                     </button>
+                    {document.ingestion_status === "failed" && canUploadDocuments ? (
+                      <button
+                        className="rounded-lg border border-amber-400/50 px-2.5 py-1 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600"
+                        disabled={retryingSourcePath !== null}
+                        onClick={() => void retryDocument(document.source_path)}
+                        type="button"
+                      >
+                        {retryingSourcePath === document.source_path
+                          ? "Retrying..."
+                          : "Retry processing"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </li>

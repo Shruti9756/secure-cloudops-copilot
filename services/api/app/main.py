@@ -57,6 +57,7 @@ from app.services.document_access import (
     DocumentAccessLevel,
     get_readable_document_access_levels,
 )
+from app.services.document_retry import reset_failed_document_for_retry
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
@@ -173,6 +174,16 @@ class DocumentUploadResponse(BaseModel):
     action: Literal["created", "updated", "unchanged"]
     tenant: str
     source_path: str
+
+
+class DocumentRetryResponse(BaseModel):
+    """Confirmation that a failed document was returned to the worker queue."""
+
+    status: Literal["accepted"]
+    action: Literal["retry_scheduled"]
+    tenant: str
+    source_path: str
+    ingestion_status: Literal["pending"]
 
 
 class DocumentDownloadResponse(BaseModel):
@@ -683,6 +694,34 @@ def record_document_upload_audit_event(
     )
 
 
+def record_document_retry_audit_event(
+    session: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    tenant: Tenant,
+    request_id: str,
+    outcome: AuditOutcome,
+    retry_status: str,
+    source_path: str,
+) -> None:
+    """Record a safe document-retry outcome."""
+    actor_type, actor_id = get_audit_actor(principal)
+
+    record_audit_event(
+        session,
+        tenant=tenant,
+        event_type="document.retry",
+        outcome=outcome,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        request_id=request_id,
+        metadata={
+            "retry_status": retry_status,
+            "source_path": source_path,
+        },
+    )
+
+
 def record_document_download_audit_event(
     session: Session,
     principal: AuthenticatedPrincipal,
@@ -972,6 +1011,84 @@ def list_document_statuses(
             )
             for document in documents
         ],
+    )
+
+
+@app.post(
+    "/api/v1/documents/retry",
+    response_model=DocumentRetryResponse,
+    tags=["documents"],
+)
+def retry_document(
+    http_request: Request,
+    source_path: Annotated[str, Query(min_length=1, max_length=1024)],
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+    tenant: Annotated[Tenant, Depends(get_authorized_document_write_tenant)],
+) -> DocumentRetryResponse:
+    """Authorize and requeue one failed document for worker processing."""
+    statement = (
+        select(KnowledgeDocument)
+        .where(
+            KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.organization_id == tenant.organization_id,
+            KnowledgeDocument.source_path == source_path,
+        )
+        .with_for_update()
+    )
+    document = session.scalar(statement)
+
+    if document is None:
+        record_document_retry_audit_event(
+            session,
+            principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            outcome="denied",
+            retry_status="document_not_found",
+            source_path=source_path,
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested document is not available.",
+        )
+
+    if document.ingestion_status != "failed":
+        record_document_retry_audit_event(
+            session,
+            principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            outcome="denied",
+            retry_status="document_not_failed",
+            source_path=source_path,
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only failed documents can be retried.",
+        )
+
+    reset_failed_document_for_retry(document)
+
+    record_document_retry_audit_event(
+        session,
+        principal,
+        tenant=tenant,
+        request_id=http_request.state.request_id,
+        outcome="succeeded",
+        retry_status="accepted",
+        source_path=source_path,
+    )
+    session.commit()
+
+    return DocumentRetryResponse(
+        status="accepted",
+        action="retry_scheduled",
+        tenant=tenant.slug,
+        source_path=document.source_path,
+        ingestion_status="pending",
     )
 
 
