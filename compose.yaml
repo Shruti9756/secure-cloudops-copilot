@@ -12,6 +12,9 @@ services:
       COGNITO_APP_CLIENT_ID: ${COGNITO_APP_CLIENT_ID:-}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
+      ASK_USER_RATE_LIMIT_REQUESTS: ${ASK_USER_RATE_LIMIT_REQUESTS:-10}
+      ASK_ORGANIZATION_RATE_LIMIT_REQUESTS: ${ASK_ORGANIZATION_RATE_LIMIT_REQUESTS:-100}
+      ASK_RATE_LIMIT_WINDOW_SECONDS: ${ASK_RATE_LIMIT_WINDOW_SECONDS:-60}
       # Containers use Docker's internal DNS, not 127.0.0.1.
       OLLAMA_BASE_URL: http://ollama:11434
       # Local-only: API mirrors redacted text to private S3 and issues short-lived links.

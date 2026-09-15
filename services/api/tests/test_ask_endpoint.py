@@ -41,7 +41,7 @@ class FakeRedisCache:
     def __init__(
         self,
         *,
-        rate_limit_result: object = (1, 60),
+        rate_limit_result: object = (1, 1, 60, 1, 60),
         rate_limit_error: Exception | None = None,
     ) -> None:
         self.entries: dict[str, str] = {}
@@ -93,11 +93,12 @@ def install_fake_dependencies(
         database_session.scalar.return_value = tenant
 
     app.dependency_overrides[get_database_session] = lambda: database_session
-    app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+    principal = AuthenticatedPrincipal(
         user_id=uuid4(),
         identity_subject="local-demo-admin",
         display_name="Local Demo Administrator",
     )
+    app.dependency_overrides[get_current_principal] = lambda: principal
     # Endpoint tests focus on RAG behavior; authorization has separate tests.
     app.dependency_overrides[get_authorized_knowledge_access] = lambda: AuthorizedTenant(
         tenant=tenant,
@@ -500,7 +501,7 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 def test_ask_endpoint_rejects_requests_after_the_rate_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = FakeRedisCache(rate_limit_result=(11, 23))
+    cache = FakeRedisCache(rate_limit_result=(0, 10, 23, 1, 23))
     rag_call = Mock()
 
     install_fake_dependencies(redis_cache=cache)
@@ -604,6 +605,7 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
     audit_session = Mock()
     tenant = Tenant(
         id=uuid4(),
+        organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
     )
@@ -649,6 +651,7 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
         "citation_validation_passed": True,
         "safety_validation_passed": True,
         "rate_limit_remaining": 9,
+        "organization_rate_limit_remaining": 99,
     }
     assert "question" not in audit_event.event_metadata
     assert "answer" not in audit_event.event_metadata
@@ -661,6 +664,7 @@ def test_ask_endpoint_audits_cache_hits_without_repeating_rag_work(
     audit_session = Mock()
     audit_session.scalar.return_value = Tenant(
         id=uuid4(),
+        organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
     )
@@ -708,11 +712,12 @@ def test_ask_endpoint_audits_rate_limit_denials(
     audit_session = Mock()
     tenant = Tenant(
         id=uuid4(),
+        organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
     )
 
-    cache = FakeRedisCache(rate_limit_result=(11, 23))
+    cache = FakeRedisCache(rate_limit_result=(0, 10, 23, 1, 23))
     rag_call = Mock()
 
     install_fake_dependencies(
@@ -773,3 +778,39 @@ def test_ask_endpoint_limits_engineers_to_organization_documents(
 
     assert response.status_code == 200
     assert captured_arguments["allowed_document_access_levels"] == DEFAULT_DOCUMENT_ACCESS_LEVELS
+
+
+def test_ask_endpoint_rejects_when_the_organization_budget_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    cache = FakeRedisCache(rate_limit_result=(0, 9, 17, 100, 31))
+    rag_call = Mock()
+
+    install_fake_dependencies(
+        redis_cache=cache,
+        tenant=tenant,
+    )
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "31"
+    assert response.headers["x-ratelimit-limit"] == "10"
+    assert response.headers["x-ratelimit-remaining"] == "1"
+    assert response.headers["x-organization-ratelimit-limit"] == "100"
+    assert response.headers["x-organization-ratelimit-remaining"] == "0"
+    assert response.headers["x-ratelimit-scope"] == "organization"
+    rag_call.assert_not_called()

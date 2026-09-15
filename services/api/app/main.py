@@ -83,8 +83,10 @@ from app.services.metrics import (
 from app.services.prompt_injection import detect_prompt_injection
 from app.services.rag import GroundedAnswer, answer_grounded_question
 from app.services.rate_limit import (
-    build_rate_limit_key,
-    check_rate_limit,
+    LayeredRateLimitResult,
+    build_organization_rate_limit_key,
+    build_user_rate_limit_key,
+    check_layered_rate_limit,
 )
 from app.services.response_cache import (
     build_ask_response_cache_key,
@@ -283,6 +285,10 @@ app.add_middleware(
         "X-RateLimit-Limit",
         "X-RateLimit-Remaining",
         "X-RateLimit-Reset",
+        "X-Organization-RateLimit-Limit",
+        "X-Organization-RateLimit-Remaining",
+        "X-Organization-RateLimit-Reset",
+        "X-RateLimit-Scope",
         "X-Request-ID",
     ],
 )
@@ -534,13 +540,42 @@ def get_redis_cache() -> Redis:
     return get_redis_client()
 
 
-def get_client_identifier(request: Request) -> str:
-    """Return the direct client identity without trusting spoofable proxy headers."""
-    if request.client is None:
-        return "unknown-client"
+def _build_rate_limit_headers(
+    rate_limit: LayeredRateLimitResult,
+) -> dict[str, str]:
+    """Build safe headers for both rate-limit scopes."""
+    return {
+        "X-RateLimit-Limit": str(rate_limit.user.limit),
+        "X-RateLimit-Remaining": str(rate_limit.user.remaining),
+        "X-RateLimit-Reset": str(rate_limit.user.reset_after_seconds),
+        "X-Organization-RateLimit-Limit": str(rate_limit.organization.limit),
+        "X-Organization-RateLimit-Remaining": str(rate_limit.organization.remaining),
+        "X-Organization-RateLimit-Reset": str(rate_limit.organization.reset_after_seconds),
+    }
 
-    # We will configure trusted proxy handling explicitly before using AWS-forwarded IPs.
-    return request.client.host
+
+def _rate_limit_retry_after_seconds(
+    rate_limit: LayeredRateLimitResult,
+) -> int:
+    """Return the reset time for the budget that caused the denial."""
+    reset_after_seconds = 0
+
+    if rate_limit.blocked_scope in {"user", "user_and_organization"}:
+        reset_after_seconds = max(
+            reset_after_seconds,
+            rate_limit.user.reset_after_seconds,
+        )
+
+    if rate_limit.blocked_scope in {
+        "organization",
+        "user_and_organization",
+    }:
+        reset_after_seconds = max(
+            reset_after_seconds,
+            rate_limit.organization.reset_after_seconds,
+        )
+
+    return max(reset_after_seconds, 1)
 
 
 def build_ask_response(
@@ -636,6 +671,8 @@ def record_ask_audit_event(
     audit_status: str,
     cache_status: str | None,
     rate_limit_remaining: int | None,
+    organization_rate_limit_remaining: int | None = None,
+    rate_limit_scope: str | None = None,
     ask_response: AskResponse | None = None,
     prompt_injection_rule_ids: tuple[str, ...] = (),
 ) -> None:
@@ -657,6 +694,11 @@ def record_ask_audit_event(
         ),
         "rate_limit_remaining": rate_limit_remaining,
     }
+    if organization_rate_limit_remaining is not None:
+        metadata["organization_rate_limit_remaining"] = organization_rate_limit_remaining
+
+    if rate_limit_scope is not None:
+        metadata["rate_limit_scope"] = rate_limit_scope
 
     if prompt_injection_rule_ids:
         # Rule IDs are bounded application constants; never record the raw question.
@@ -1398,14 +1440,19 @@ def ask_question(
         )
 
     settings = get_settings()
-    rate_limit_key = build_rate_limit_key(
-        tenant_slug=tenant.slug,
-        client_identifier=get_client_identifier(http_request),
+    user_rate_limit_key = build_user_rate_limit_key(
+        organization_id=tenant.organization_id,
+        user_id=principal.user_id,
     )
-    rate_limit = check_rate_limit(
+    organization_rate_limit_key = build_organization_rate_limit_key(
+        organization_id=tenant.organization_id,
+    )
+    rate_limit = check_layered_rate_limit(
         cache,
-        cache_key=rate_limit_key,
-        limit=settings.ask_rate_limit_requests,
+        user_cache_key=user_rate_limit_key,
+        organization_cache_key=organization_rate_limit_key,
+        user_limit=settings.ask_user_rate_limit_requests,
+        organization_limit=settings.ask_organization_rate_limit_requests,
         window_seconds=settings.ask_rate_limit_window_seconds,
     )
 
@@ -1446,22 +1493,21 @@ def ask_question(
             outcome="denied",
             audit_status="rate_limited",
             cache_status=None,
-            rate_limit_remaining=0,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
+            rate_limit_scope=rate_limit.blocked_scope,
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests. Retry after the current rate-limit window.",
             headers={
-                "Retry-After": str(rate_limit.reset_after_seconds),
-                "X-RateLimit-Limit": str(rate_limit.limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(rate_limit.reset_after_seconds),
+                "Retry-After": str(_rate_limit_retry_after_seconds(rate_limit)),
+                **_build_rate_limit_headers(rate_limit),
+                "X-RateLimit-Scope": rate_limit.blocked_scope or "unknown",
             },
         )
 
-    response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
-    response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
-    response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_after_seconds)
+    response.headers.update(_build_rate_limit_headers(rate_limit))
 
     prompt_injection_detection = detect_prompt_injection(request.question)
 
@@ -1479,7 +1525,8 @@ def ask_question(
             outcome="denied",
             audit_status="prompt_injection_detected",
             cache_status=None,
-            rate_limit_remaining=rate_limit.remaining,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
             prompt_injection_rule_ids=prompt_injection_detection.matched_rule_ids,
         )
         raise HTTPException(
@@ -1526,7 +1573,8 @@ def ask_question(
                     outcome="succeeded",
                     audit_status="cache_hit",
                     cache_status="HIT",
-                    rate_limit_remaining=rate_limit.remaining,
+                    rate_limit_remaining=rate_limit.user.remaining,
+                    organization_rate_limit_remaining=rate_limit.organization.remaining,
                     ask_response=cached_response,
                     request_id=http_request.state.request_id,
                 )
@@ -1560,7 +1608,8 @@ def ask_question(
             outcome="failed",
             audit_status="model_provider_unavailable",
             cache_status=response.headers["X-Cache"],
-            rate_limit_remaining=rate_limit.remaining,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
             request_id=http_request.state.request_id,
         )
         raise HTTPException(
@@ -1605,7 +1654,8 @@ def ask_question(
         outcome=audit_outcome,
         audit_status="completed",
         cache_status=response.headers["X-Cache"],
-        rate_limit_remaining=rate_limit.remaining,
+        rate_limit_remaining=rate_limit.user.remaining,
+        organization_rate_limit_remaining=rate_limit.organization.remaining,
         ask_response=ask_response,
         request_id=http_request.state.request_id,
     )
