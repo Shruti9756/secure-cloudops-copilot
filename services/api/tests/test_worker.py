@@ -53,6 +53,7 @@ def test_process_document_chunks_then_embeds_pending_document(
 ) -> None:
     session = Mock()
     provider = Mock()
+    job_progress = Mock()
     document = make_document(
         processing_attempt_count=2,
         next_processing_attempt_at=AVAILABLE_AT,
@@ -82,6 +83,7 @@ def test_process_document_chunks_then_embeds_pending_document(
         session=session,
         document=document,
         provider=provider,
+        job_progress=job_progress,
     )
 
     assert result == ProcessingCycleResult(
@@ -103,6 +105,10 @@ def test_process_document_chunks_then_embeds_pending_document(
         document=document,
         provider=provider,
     )
+    assert job_progress.call_args_list == [
+        call("chunking"),
+        call("embedding"),
+    ]
     assert document.processing_attempt_count == 0
     assert document.next_processing_attempt_at is None
     assert document.last_processing_failure_reason is None
@@ -113,6 +119,7 @@ def test_process_document_embeds_chunked_document_without_rechunking(
 ) -> None:
     session = Mock()
     provider = Mock()
+    job_progress = Mock()
     document = make_document(
         ingestion_status="chunked",
         processing_attempt_count=1,
@@ -138,6 +145,7 @@ def test_process_document_embeds_chunked_document_without_rechunking(
         session=session,
         document=document,
         provider=provider,
+        job_progress=job_progress,
     )
 
     assert result == ProcessingCycleResult(
@@ -155,6 +163,7 @@ def test_process_document_embeds_chunked_document_without_rechunking(
         document=document,
         provider=provider,
     )
+    job_progress.assert_called_once_with("embedding")
     assert document.processing_attempt_count == 0
     assert document.next_processing_attempt_at is None
     assert document.last_processing_failure_reason is None
@@ -299,7 +308,15 @@ def test_process_next_document_releases_redis_lock_after_success(
 ) -> None:
     session = MagicMock()
     session_factory = MagicMock()
-    session_factory.begin.return_value.__enter__.return_value = session
+    outer_transaction = session_factory.begin.return_value
+    outer_transaction.__enter__.return_value = session
+    lifecycle_events: list[str] = []
+
+    def record_transaction_exit(*_arguments: object) -> None:
+        lifecycle_events.append("database_commit")
+
+    outer_transaction.__exit__.side_effect = record_transaction_exit
+
     provider = Mock()
     redis_client = Mock()
     redis_client.eval.return_value = 1
@@ -320,15 +337,37 @@ def test_process_next_document_releases_redis_lock_after_success(
         input_tokens=10,
     )
 
+    def process_successfully(**arguments: object) -> ProcessingCycleResult:
+        job_progress = arguments["job_progress"]
+        assert callable(job_progress)
+
+        job_progress("chunking")
+        job_progress("embedding")
+
+        return result_value
+
+    def record_job_status(
+        _redis_client: object,
+        **arguments: object,
+    ) -> bool:
+        lifecycle_events.append(f"status:{arguments['stage']}")
+        return True
+
     acquire_lock = Mock(return_value=lease)
     release_lock = Mock(return_value=True)
+    process_claimed_document = Mock(side_effect=process_successfully)
+    store_job_status = Mock(side_effect=record_job_status)
 
     monkeypatch.setattr("app.worker.claim_next_document", Mock(return_value=document))
     monkeypatch.setattr("app.worker.acquire_document_lock", acquire_lock)
     monkeypatch.setattr("app.worker.release_document_lock", release_lock)
     monkeypatch.setattr(
         "app.worker.process_document",
-        Mock(return_value=result_value),
+        process_claimed_document,
+    )
+    monkeypatch.setattr(
+        "app.worker.store_document_job_status",
+        store_job_status,
     )
 
     result = process_next_document(
@@ -345,6 +384,132 @@ def test_process_next_document_releases_redis_lock_after_success(
         document_id=document.id,
     )
     release_lock.assert_called_once_with(redis_client, lease)
+    process_claimed_document.assert_called_once_with(
+        session=session,
+        document=document,
+        provider=provider,
+        lock_heartbeat=ANY,
+        job_progress=ANY,
+    )
+    outer_transaction.__exit__.assert_called_once_with(None, None, None)
+
+    assert lifecycle_events == [
+        "status:claimed",
+        "status:chunking",
+        "status:embedding",
+        "database_commit",
+        "status:completed",
+    ]
+    assert store_job_status.call_args_list == [
+        call(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage="claimed",
+            source_sha256=document.source_sha256,
+            processing_attempt_count=0,
+        ),
+        call(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage="chunking",
+            source_sha256=document.source_sha256,
+            processing_attempt_count=0,
+        ),
+        call(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage="embedding",
+            source_sha256=document.source_sha256,
+            processing_attempt_count=0,
+        ),
+        call(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage="completed",
+            source_sha256=document.source_sha256,
+            processing_attempt_count=0,
+        ),
+    ]
+
+
+def test_process_next_document_suppresses_completion_after_lock_release_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock()
+    session_factory = MagicMock()
+    session_factory.begin.return_value.__enter__.return_value = session
+    provider = Mock()
+    redis_client = Mock()
+    redis_client.eval.return_value = 1
+    document = make_document()
+
+    lease = DocumentLockLease(
+        key="document-lock",
+        owner_token="worker-token",
+        ttl_seconds=120,
+    )
+    result_value = ProcessingCycleResult(
+        chunked_documents=1,
+        chunks_created=1,
+        embedded_documents=1,
+        embedded_chunks=1,
+        skipped_chunks=0,
+        input_tokens=10,
+    )
+
+    def process_successfully(**arguments: object) -> ProcessingCycleResult:
+        job_progress = arguments["job_progress"]
+        assert callable(job_progress)
+
+        job_progress("chunking")
+        job_progress("embedding")
+
+        return result_value
+
+    store_job_status = Mock(return_value=True)
+    release_lock = Mock(return_value=False)
+
+    monkeypatch.setattr("app.worker.claim_next_document", Mock(return_value=document))
+    monkeypatch.setattr(
+        "app.worker.acquire_document_lock",
+        Mock(return_value=lease),
+    )
+    monkeypatch.setattr(
+        "app.worker.process_document",
+        Mock(side_effect=process_successfully),
+    )
+    monkeypatch.setattr(
+        "app.worker.release_document_lock",
+        release_lock,
+    )
+    monkeypatch.setattr(
+        "app.worker.store_document_job_status",
+        store_job_status,
+    )
+
+    result = process_next_document(
+        session_factory=session_factory,
+        tenant_slug="nimbuscart",
+        provider=provider,
+        redis_client=redis_client,
+        available_at=AVAILABLE_AT,
+    )
+
+    assert result == result_value
+    release_lock.assert_called_once_with(redis_client, lease)
+    assert [status_call.kwargs["stage"] for status_call in store_job_status.call_args_list] == [
+        "claimed",
+        "chunking",
+        "embedding",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -352,10 +517,21 @@ def test_process_next_document_releases_redis_lock_after_success(
         "initial_attempt_count",
         "expected_status",
         "expected_next_attempt_at",
+        "expected_job_stage",
     ),
     [
-        (0, "pending", FAILURE_AT + timedelta(seconds=5)),
-        (4, "failed", None),
+        (
+            0,
+            "pending",
+            FAILURE_AT + timedelta(seconds=5),
+            "retry_scheduled",
+        ),
+        (
+            4,
+            "failed",
+            None,
+            "failed",
+        ),
     ],
 )
 def test_process_next_document_rolls_back_processing_and_commits_failure_state(
@@ -363,6 +539,7 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
     initial_attempt_count: int,
     expected_status: str,
     expected_next_attempt_at: datetime | None,
+    expected_job_stage: str,
 ) -> None:
     session = MagicMock()
     session_factory = MagicMock()
@@ -370,8 +547,14 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
     outer_transaction.__enter__.return_value = session
     nested_transaction = session.begin_nested.return_value
     nested_transaction.__exit__.return_value = False
-    provider = Mock()
+    lifecycle_events: list[str] = []
 
+    def record_transaction_exit(*_arguments: object) -> None:
+        lifecycle_events.append("database_commit")
+
+    outer_transaction.__exit__.side_effect = record_transaction_exit
+
+    provider = Mock()
     document = make_document(
         processing_attempt_count=initial_attempt_count,
     )
@@ -381,12 +564,25 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
         side_effect=TimeoutError("raw provider failure must not be stored")
     )
 
+    redis_client = Mock()
+    redis_client.eval.return_value = 1
+
+    def record_job_status(
+        _redis_client: object,
+        **arguments: object,
+    ) -> bool:
+        lifecycle_events.append(f"status:{arguments['stage']}")
+        return True
+
+    store_job_status = Mock(side_effect=record_job_status)
+
     monkeypatch.setattr("app.worker.claim_next_document", claim_document)
     monkeypatch.setattr("app.worker.process_document", process_claimed_document)
     monkeypatch.setattr("app.worker._utc_now", Mock(return_value=FAILURE_AT))
-
-    redis_client = Mock()
-    redis_client.eval.return_value = 1
+    monkeypatch.setattr(
+        "app.worker.store_document_job_status",
+        store_job_status,
+    )
 
     result = process_next_document(
         session_factory=session_factory,
@@ -408,6 +604,7 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
         document=document,
         provider=provider,
         lock_heartbeat=ANY,
+        job_progress=ANY,
     )
 
     # The processing exception reached the savepoint, so it rolled back.
@@ -416,6 +613,32 @@ def test_process_next_document_rolls_back_processing_and_commits_failure_state(
 
     # The outer transaction exited normally, so the retry state committed.
     outer_transaction.__exit__.assert_called_once_with(None, None, None)
+
+    assert lifecycle_events == [
+        "status:claimed",
+        "database_commit",
+        f"status:{expected_job_stage}",
+    ]
+    assert store_job_status.call_args_list == [
+        call(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage="claimed",
+            source_sha256=document.source_sha256,
+            processing_attempt_count=initial_attempt_count,
+        ),
+        call(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage=expected_job_stage,
+            source_sha256=document.source_sha256,
+            processing_attempt_count=initial_attempt_count + 1,
+        ),
+    ]
 
     session.refresh.assert_called_once_with(document)
     session.flush.assert_called_once_with()

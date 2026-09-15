@@ -24,12 +24,27 @@ type DocumentIngestionStatus =
   | "chunked"
   | "embedded"
   | "failed";
+
 type DocumentAccessLevel = "organization" | "restricted";
+
+type DocumentProcessingStage =
+  | "claimed"
+  | "chunking"
+  | "embedding"
+  | "retry_scheduled"
+  | "completed"
+  | "failed";
+
+type DocumentProcessingProgress = {
+  stage: DocumentProcessingStage;
+  updated_at: string;
+};
 
 type DocumentStatusItem = {
   source_path: string;
   title: string;
   ingestion_status: DocumentIngestionStatus;
+  processing_progress?: DocumentProcessingProgress | null;
 };
 
 type DocumentStatusListResponse = {
@@ -88,6 +103,19 @@ function getStatusClasses(status: DocumentIngestionStatus): string {
   }
 
   return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+}
+
+const PROCESSING_STAGE_LABELS: Record<DocumentProcessingStage, string> = {
+  claimed: "Preparing document",
+  chunking: "Creating chunks",
+  embedding: "Creating embeddings",
+  retry_scheduled: "Retry scheduled",
+  completed: "Processing complete",
+  failed: "Processing failed",
+};
+
+function getProcessingStageLabel(stage: DocumentProcessingStage): string {
+  return PROCESSING_STAGE_LABELS[stage] ?? "Processing";
 }
 
 function isSupportedDocumentFile(file: File): boolean {
@@ -554,6 +582,12 @@ text, validates it, and redacts secrets before storage.
                     <p className="mt-1 break-all text-xs text-slate-500">
                       {document.source_path}
                     </p>
+                    {document.processing_progress ? (
+                      <p className="mt-2 text-xs font-medium text-cyan-300">
+                        Current step:{" "}
+                        {getProcessingStageLabel(document.processing_progress.stage)}
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="flex shrink-0 flex-wrap items-center gap-2">

@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable, Iterator
+from datetime import datetime
 from functools import lru_cache
 from time import perf_counter
 from typing import Annotated, Literal
@@ -56,6 +57,11 @@ from app.services.cognito_identity import (
 from app.services.document_access import (
     DocumentAccessLevel,
     get_readable_document_access_levels,
+)
+from app.services.document_job_status import (
+    DocumentJobStage,
+    DocumentJobStatusLookup,
+    load_document_job_statuses,
 )
 from app.services.document_retry import reset_failed_document_for_retry
 from app.services.document_storage import (
@@ -194,12 +200,20 @@ class DocumentDownloadResponse(BaseModel):
     expires_in_seconds: int
 
 
+class DocumentProcessingProgressResponse(BaseModel):
+    """Safe best-effort worker progress loaded from short-lived Redis state."""
+
+    stage: DocumentJobStage
+    updated_at: datetime
+
+
 class DocumentStatusItemResponse(BaseModel):
     """Safe lifecycle information for one tenant-scoped knowledge document."""
 
     source_path: str
     title: str
     ingestion_status: Literal["pending", "chunked", "embedded", "failed"]
+    processing_progress: DocumentProcessingProgressResponse | None = None
 
 
 class DocumentStatusListResponse(BaseModel):
@@ -516,7 +530,7 @@ def get_chat_provider() -> OllamaChatClient:
 
 
 def get_redis_cache() -> Redis:
-    """Provide Redis for short-lived response caching; tests override it."""
+    """Provide Redis for short-lived application state; tests override it."""
     return get_redis_client()
 
 
@@ -983,6 +997,7 @@ def list_document_statuses(
         AuthorizedTenant,
         Depends(get_authorized_knowledge_access),
     ],
+    redis_client: Annotated[Redis, Depends(get_redis_cache)],
 ) -> DocumentStatusListResponse:
     """List safe processing statuses for documents in the server-controlled tenant."""
     tenant = authorized_tenant.tenant
@@ -1000,17 +1015,47 @@ def list_document_statuses(
     )
     documents = list(session.scalars(statement))
 
-    # Never expose document content, chunks, vectors, hashes, or redaction metadata here.
-    return DocumentStatusListResponse(
-        tenant=tenant.slug,
-        documents=[
+    processing_statuses = load_document_job_statuses(
+        redis_client,
+        organization_id=tenant.organization_id,
+        tenant_id=tenant.id,
+        lookups=tuple(
+            DocumentJobStatusLookup(
+                document_id=document.id,
+                expected_source_sha256=document.source_sha256,
+                expected_processing_attempt_count=document.processing_attempt_count,
+            )
+            for document in documents
+        ),
+    )
+
+    response_documents: list[DocumentStatusItemResponse] = []
+
+    for document, processing_status in zip(
+        documents,
+        processing_statuses,
+        strict=True,
+    ):
+        response_documents.append(
             DocumentStatusItemResponse(
                 source_path=document.source_path,
                 title=document.title,
                 ingestion_status=document.ingestion_status,
+                processing_progress=(
+                    DocumentProcessingProgressResponse(
+                        stage=processing_status.stage,
+                        updated_at=processing_status.updated_at,
+                    )
+                    if processing_status is not None
+                    else None
+                ),
             )
-            for document in documents
-        ],
+        )
+
+    # Never expose document content, chunks, vectors, hashes, or redaction metadata here.
+    return DocumentStatusListResponse(
+        tenant=tenant.slug,
+        documents=response_documents,
     )
 
 

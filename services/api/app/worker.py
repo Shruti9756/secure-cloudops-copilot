@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,6 +16,11 @@ from app.db.session import get_session_factory
 from app.infrastructure.ollama import OllamaEmbeddingClient
 from app.infrastructure.redis import get_redis_client
 from app.services.chunking import replace_document_chunks
+from app.services.document_job_status import (
+    DocumentJobStage,
+    DocumentJobStatusClient,
+    store_document_job_status,
+)
 from app.services.document_lock import (
     DocumentLockClient,
     DocumentLockLost,
@@ -34,6 +40,10 @@ from app.services.embedding_persistence import embed_document_chunks
 from app.services.embeddings import EmbeddingProvider
 
 LOGGER = logging.getLogger(__name__)
+
+
+class DocumentWorkerRedisClient(DocumentLockClient, DocumentJobStatusClient, Protocol):
+    """Redis operations required by document locking and progress reporting."""
 
 
 @dataclass(frozen=True)
@@ -76,6 +86,41 @@ def _normalize_tenant_slug(tenant_slug: str) -> str:
         raise ValueError("Document processor tenant slug must not be empty")
 
     return normalized_tenant_slug
+
+
+def _store_document_progress(
+    redis_client: DocumentJobStatusClient,
+    *,
+    document: KnowledgeDocument,
+    stage: DocumentJobStage,
+) -> None:
+    """Record best-effort progress without interrupting durable processing."""
+    try:
+        stored = store_document_job_status(
+            redis_client,
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+            stage=stage,
+            source_sha256=document.source_sha256,
+            processing_attempt_count=document.processing_attempt_count,
+        )
+    except TypeError, ValueError:
+        LOGGER.exception(
+            "Document progress metadata was invalid: tenant_id=%s document_id=%s stage=%s",
+            document.tenant_id,
+            document.id,
+            stage,
+        )
+        return
+
+    if not stored:
+        LOGGER.warning(
+            "Document progress could not be stored: tenant_id=%s document_id=%s stage=%s",
+            document.tenant_id,
+            document.id,
+            stage,
+        )
 
 
 def _summarize_processing_results(
@@ -151,12 +196,16 @@ def process_document(
     document: KnowledgeDocument,
     provider: EmbeddingProvider,
     lock_heartbeat: Callable[[], None] | None = None,
+    job_progress: Callable[[DocumentJobStage], None] | None = None,
 ) -> ProcessingCycleResult:
     """Chunk and embed exactly one document inside the active savepoint."""
     chunked_documents = 0
     chunks_created = 0
 
     if document.ingestion_status == "pending":
+        if job_progress is not None:
+            job_progress("chunking")
+
         chunking_result = replace_document_chunks(
             session=session,
             document=document,
@@ -170,6 +219,9 @@ def process_document(
         session.expire(document, ["chunks"])
     elif document.ingestion_status != "chunked":
         raise ValueError("Document must be pending or chunked before processing")
+
+    if job_progress is not None:
+        job_progress("embedding")
 
     if lock_heartbeat is None:
         embedding_result = embed_document_chunks(
@@ -203,11 +255,15 @@ def process_next_document(
     session_factory: sessionmaker[Session],
     tenant_slug: str,
     provider: EmbeddingProvider,
-    redis_client: DocumentLockClient,
+    redis_client: DocumentWorkerRedisClient,
     available_at: datetime,
 ) -> ProcessingCycleResult | None:
     """Claim and process one due document with PostgreSQL and Redis locks."""
     normalized_tenant_slug = _normalize_tenant_slug(tenant_slug)
+    result: ProcessingCycleResult | None = None
+    final_stage: DocumentJobStage | None = None
+    final_status_document: KnowledgeDocument | None = None
+    lock_ownership_intact = True
 
     with session_factory.begin() as session:
         document = claim_next_document(
@@ -242,11 +298,27 @@ def process_next_document(
             )
             return None
 
+        final_status_document = document
+        _store_document_progress(
+            redis_client,
+            document=document,
+            stage="claimed",
+        )
+
         def renew_lock() -> None:
             if not renew_document_lock(redis_client, lease):
                 raise DocumentLockLost(
                     f"Document lock ownership was lost for document {document.id}"
                 )
+
+        def report_job_progress(stage: DocumentJobStage) -> None:
+            # Confirm lock ownership before publishing progress.
+            renew_lock()
+            _store_document_progress(
+                redis_client,
+                document=document,
+                stage=stage,
+            )
 
         try:
             try:
@@ -258,17 +330,19 @@ def process_next_document(
                         document=document,
                         provider=provider,
                         lock_heartbeat=renew_lock,
+                        job_progress=report_job_progress,
                     )
 
                     renew_lock()
             except DocumentLockLost, DocumentLockUnavailable:
+                lock_ownership_intact = False
                 LOGGER.warning(
                     "Document processing stopped because lock ownership was lost: "
                     "tenant=%s document_id=%s",
                     normalized_tenant_slug,
                     document.id,
                 )
-                return None
+                result = None
             except Exception as error:  # noqa: BLE001
                 session.refresh(document)
 
@@ -280,6 +354,9 @@ def process_next_document(
                 )
                 session.flush()
 
+                final_stage = "retry_scheduled" if retry_scheduled else "failed"
+                result = EMPTY_PROCESSING_CYCLE_RESULT
+
                 LOGGER.warning(
                     "Document processing attempt failed: "
                     "tenant=%s document_id=%s failure_reason=%s retry_scheduled=%s",
@@ -288,14 +365,13 @@ def process_next_document(
                     failure_reason,
                     retry_scheduled,
                 )
-
-                return EMPTY_PROCESSING_CYCLE_RESULT
-
-            return result
+            else:
+                final_stage = "completed"
         finally:
             try:
                 released = release_document_lock(redis_client, lease)
             except DocumentLockUnavailable:
+                lock_ownership_intact = False
                 LOGGER.exception(
                     "Document lock could not be released: tenant=%s document_id=%s",
                     normalized_tenant_slug,
@@ -303,11 +379,22 @@ def process_next_document(
                 )
             else:
                 if not released:
+                    lock_ownership_intact = False
                     LOGGER.warning(
                         "Document lock ownership was lost before release: tenant=%s document_id=%s",
                         normalized_tenant_slug,
                         document.id,
                     )
+
+    # Reaching this line proves that the outer PostgreSQL transaction committed.
+    if final_stage is not None and final_status_document is not None and lock_ownership_intact:
+        _store_document_progress(
+            redis_client,
+            document=final_status_document,
+            stage=final_stage,
+        )
+
+    return result
 
 
 def process_one_cycle(
@@ -315,7 +402,7 @@ def process_one_cycle(
     session_factory: sessionmaker[Session],
     tenant_slug: str,
     provider: EmbeddingProvider,
-    redis_client: DocumentLockClient,
+    redis_client: DocumentWorkerRedisClient,
 ) -> ProcessingCycleResult:
     """Process each currently due document in its own transaction."""
     normalized_tenant_slug = _normalize_tenant_slug(tenant_slug)
@@ -343,7 +430,7 @@ def process_all_tenant_documents(
     *,
     session_factory: sessionmaker[Session],
     provider: EmbeddingProvider,
-    redis_client: DocumentLockClient,
+    redis_client: DocumentWorkerRedisClient,
 ) -> ProcessingCycleResult:
     """Process all tenants while isolating each individual document attempt."""
     available_at = _utc_now()
