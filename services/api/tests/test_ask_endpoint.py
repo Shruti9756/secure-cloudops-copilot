@@ -31,6 +31,11 @@ from app.services.rag import GroundedAnswer, GroundingChunk
 from app.services.response_cache import build_ask_response_cache_key
 from app.services.retrieval import RetrievedChunk
 from app.services.safety import SafetyValidationResult
+from app.services.token_quota import (
+    READ_ORGANIZATION_TOKEN_QUOTA_LUA,
+    RECORD_ORGANIZATION_TOKEN_USAGE_LUA,
+    build_organization_token_quota_key,
+)
 
 client = TestClient(app)
 
@@ -43,11 +48,18 @@ class FakeRedisCache:
         *,
         rate_limit_result: object = (1, 1, 60, 1, 60),
         rate_limit_error: Exception | None = None,
+        token_quota_status_result: object = (0, -2),
+        token_quota_record_result: object = (70, 86_400),
+        token_quota_error: Exception | None = None,
     ) -> None:
         self.entries: dict[str, str] = {}
         self.rate_limit_result = rate_limit_result
         self.rate_limit_error = rate_limit_error
         self.rate_limit_calls: list[tuple[str, int, tuple[str, ...]]] = []
+        self.token_quota_status_result = token_quota_status_result
+        self.token_quota_record_result = token_quota_record_result
+        self.token_quota_error = token_quota_error
+        self.token_quota_calls: list[tuple[str, int, tuple[str, ...]]] = []
 
     def get(self, name: str) -> str | None:
         return self.entries.get(name)
@@ -62,6 +74,20 @@ class FakeRedisCache:
         numkeys: int,
         *keys_and_args: str,
     ) -> object:
+        if script in {
+            READ_ORGANIZATION_TOKEN_QUOTA_LUA,
+            RECORD_ORGANIZATION_TOKEN_USAGE_LUA,
+        }:
+            self.token_quota_calls.append((script, numkeys, keys_and_args))
+
+            if self.token_quota_error is not None:
+                raise self.token_quota_error
+
+            if script == READ_ORGANIZATION_TOKEN_QUOTA_LUA:
+                return self.token_quota_status_result
+
+            return self.token_quota_record_result
+
         self.rate_limit_calls.append((script, numkeys, keys_and_args))
 
         if self.rate_limit_error is not None:
@@ -652,6 +678,8 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
         "safety_validation_passed": True,
         "rate_limit_remaining": 9,
         "organization_rate_limit_remaining": 99,
+        "organization_token_quota_used": 70,
+        "organization_token_quota_remaining": 49_930,
     }
     assert "question" not in audit_event.event_metadata
     assert "answer" not in audit_event.event_metadata
@@ -694,6 +722,7 @@ def test_ask_endpoint_audits_cache_hits_without_repeating_rag_work(
     assert first_response.headers["x-cache"] == "MISS"
     assert second_response.headers["x-cache"] == "HIT"
     assert rag_call.call_count == 1
+    assert len(cache.token_quota_calls) == 2
     assert len(audit_events) == 2
     assert [event.event_metadata["cache_status"] for event in audit_events] == [
         "MISS",
@@ -814,3 +843,115 @@ def test_ask_endpoint_rejects_when_the_organization_budget_is_exhausted(
     assert response.headers["x-organization-ratelimit-remaining"] == "0"
     assert response.headers["x-ratelimit-scope"] == "organization"
     rag_call.assert_not_called()
+
+
+def test_ask_endpoint_rejects_an_exhausted_token_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache(
+        token_quota_status_result=(50_000, 3600),
+    )
+    rag_call = Mock()
+
+    install_fake_dependencies(redis_cache=cache)
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == (
+        "Organization model-token quota is exhausted. Retry after the quota window resets."
+    )
+    assert response.headers["retry-after"] == "3600"
+    assert response.headers["x-organization-token-quota-limit"] == "50000"
+    assert response.headers["x-organization-token-quota-used"] == "50000"
+    assert response.headers["x-organization-token-quota-remaining"] == "0"
+    rag_call.assert_not_called()
+
+
+def test_ask_endpoint_fails_closed_when_token_quota_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache(
+        token_quota_error=RedisConnectionError("Redis token quota is unavailable"),
+    )
+    rag_call = Mock()
+
+    install_fake_dependencies(redis_cache=cache)
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Model-usage protection is temporarily unavailable. Retry shortly."
+    )
+    assert response.headers["retry-after"] == "1"
+    rag_call.assert_not_called()
+
+
+def test_ask_endpoint_records_actual_chat_model_token_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    cache = FakeRedisCache()
+    rag_call = Mock(return_value=make_grounded_answer())
+
+    install_fake_dependencies(
+        redis_cache=cache,
+        tenant=tenant,
+    )
+    monkeypatch.setattr(
+        "app.main.answer_grounded_question",
+        rag_call,
+    )
+
+    try:
+        response = client.post(
+            "/api/v1/ask",
+            json={"question": "Why did checkout latency increase?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    expected_quota_key = build_organization_token_quota_key(
+        organization_id=tenant.organization_id,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-organization-token-quota-limit"] == "50000"
+    assert response.headers["x-organization-token-quota-used"] == "70"
+    assert response.headers["x-organization-token-quota-remaining"] == "49930"
+    assert cache.token_quota_calls == [
+        (
+            READ_ORGANIZATION_TOKEN_QUOTA_LUA,
+            1,
+            (expected_quota_key,),
+        ),
+        (
+            RECORD_ORGANIZATION_TOKEN_USAGE_LUA,
+            1,
+            (
+                expected_quota_key,
+                "70",
+                "86400",
+            ),
+        ),
+    ]

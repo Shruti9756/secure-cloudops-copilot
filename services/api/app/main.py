@@ -94,6 +94,12 @@ from app.services.response_cache import (
     store_cached_response,
 )
 from app.services.retrieval import DEFAULT_RETRIEVAL_LIMIT, MAX_RETRIEVAL_LIMIT
+from app.services.token_quota import (
+    OrganizationTokenQuotaStatus,
+    build_organization_token_quota_key,
+    get_organization_token_quota_status,
+    record_organization_token_usage,
+)
 from app.services.upload_validation import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     validate_and_extract_upload,
@@ -288,6 +294,10 @@ app.add_middleware(
         "X-Organization-RateLimit-Limit",
         "X-Organization-RateLimit-Remaining",
         "X-Organization-RateLimit-Reset",
+        "X-Organization-Token-Quota-Limit",
+        "X-Organization-Token-Quota-Used",
+        "X-Organization-Token-Quota-Remaining",
+        "X-Organization-Token-Quota-Reset",
         "X-RateLimit-Scope",
         "X-Request-ID",
     ],
@@ -554,6 +564,18 @@ def _build_rate_limit_headers(
     }
 
 
+def _build_token_quota_headers(
+    quota_status: OrganizationTokenQuotaStatus,
+) -> dict[str, str]:
+    """Build safe organization token-quota response headers."""
+    return {
+        "X-Organization-Token-Quota-Limit": str(quota_status.token_limit),
+        "X-Organization-Token-Quota-Used": str(quota_status.used_tokens),
+        "X-Organization-Token-Quota-Remaining": str(quota_status.remaining_tokens),
+        "X-Organization-Token-Quota-Reset": str(quota_status.reset_after_seconds),
+    }
+
+
 def _rate_limit_retry_after_seconds(
     rate_limit: LayeredRateLimitResult,
 ) -> int:
@@ -673,6 +695,8 @@ def record_ask_audit_event(
     rate_limit_remaining: int | None,
     organization_rate_limit_remaining: int | None = None,
     rate_limit_scope: str | None = None,
+    organization_token_quota_used: int | None = None,
+    organization_token_quota_remaining: int | None = None,
     ask_response: AskResponse | None = None,
     prompt_injection_rule_ids: tuple[str, ...] = (),
 ) -> None:
@@ -699,6 +723,12 @@ def record_ask_audit_event(
 
     if rate_limit_scope is not None:
         metadata["rate_limit_scope"] = rate_limit_scope
+
+    if organization_token_quota_used is not None:
+        metadata["organization_token_quota_used"] = organization_token_quota_used
+
+    if organization_token_quota_remaining is not None:
+        metadata["organization_token_quota_remaining"] = organization_token_quota_remaining
 
     if prompt_injection_rule_ids:
         # Rule IDs are bounded application constants; never record the raw question.
@@ -1584,6 +1614,74 @@ def ask_question(
     cache_status = "MISS" if cache_lookup.is_available else "BYPASS"
     response.headers["X-Cache"] = cache_status
 
+    organization_token_quota_key = build_organization_token_quota_key(
+        organization_id=tenant.organization_id,
+    )
+    token_quota_status = get_organization_token_quota_status(
+        cache,
+        cache_key=organization_token_quota_key,
+        token_limit=settings.ask_organization_token_quota_tokens,
+    )
+
+    if not token_quota_status.is_enforced:
+        observe_rag_request(
+            status="token_quota_unavailable",
+            cache_status=cache_status,
+        )
+        record_ask_audit_event(
+            session,
+            principal=principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            event_type="rag.answer_request",
+            outcome="failed",
+            audit_status="token_quota_unavailable",
+            cache_status=cache_status,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=("Model-usage protection is temporarily unavailable. Retry shortly."),
+            headers={
+                "Retry-After": "1",
+                **_build_rate_limit_headers(rate_limit),
+            },
+        )
+
+    if not token_quota_status.has_capacity:
+        observe_rag_request(
+            status="token_quota_exhausted",
+            cache_status=cache_status,
+        )
+        record_ask_audit_event(
+            session,
+            principal=principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            event_type="rag.answer_request",
+            outcome="denied",
+            audit_status="token_quota_exhausted",
+            cache_status=cache_status,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
+            organization_token_quota_used=token_quota_status.used_tokens,
+            organization_token_quota_remaining=(token_quota_status.remaining_tokens),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Organization model-token quota is exhausted. Retry after the quota window resets."
+            ),
+            headers={
+                "Retry-After": str(max(token_quota_status.reset_after_seconds, 1)),
+                **_build_rate_limit_headers(rate_limit),
+                **_build_token_quota_headers(token_quota_status),
+            },
+        )
+
+    response.headers.update(_build_token_quota_headers(token_quota_status))
+
     try:
         answer = answer_grounded_question(
             session=session,
@@ -1622,6 +1720,45 @@ def ask_question(
         tenant=tenant,
     )
 
+    chat_model_token_count = (answer.prompt_token_count or 0) + (answer.completion_token_count or 0)
+
+    if chat_model_token_count > 0:
+        token_quota_status = record_organization_token_usage(
+            cache,
+            cache_key=organization_token_quota_key,
+            token_count=chat_model_token_count,
+            token_limit=settings.ask_organization_token_quota_tokens,
+            window_seconds=settings.ask_token_quota_window_seconds,
+        )
+
+        if not token_quota_status.is_enforced:
+            observe_rag_request(
+                status="token_quota_unavailable",
+                cache_status=cache_status,
+            )
+            record_ask_audit_event(
+                session,
+                principal=principal,
+                tenant=tenant,
+                request_id=http_request.state.request_id,
+                event_type="rag.answer_completed",
+                outcome="failed",
+                audit_status="token_quota_recording_unavailable",
+                cache_status=cache_status,
+                rate_limit_remaining=rate_limit.user.remaining,
+                organization_rate_limit_remaining=(rate_limit.organization.remaining),
+                ask_response=ask_response,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=("Model-usage accounting is temporarily unavailable. Retry shortly."),
+                headers={
+                    "Retry-After": "1",
+                    **_build_rate_limit_headers(rate_limit),
+                },
+            )
+
+        response.headers.update(_build_token_quota_headers(token_quota_status))
     observe_rag_request(
         status=ask_response.status,
         cache_status=cache_status,
@@ -1656,6 +1793,8 @@ def ask_question(
         cache_status=response.headers["X-Cache"],
         rate_limit_remaining=rate_limit.user.remaining,
         organization_rate_limit_remaining=rate_limit.organization.remaining,
+        organization_token_quota_used=token_quota_status.used_tokens,
+        organization_token_quota_remaining=token_quota_status.remaining_tokens,
         ask_response=ask_response,
         request_id=http_request.state.request_id,
     )
