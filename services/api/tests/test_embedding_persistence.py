@@ -76,6 +76,9 @@ def test_embed_document_chunks_persists_missing_vectors() -> None:
     assert result.embedded_chunk_count == 2
     assert result.skipped_chunk_count == 0
     assert result.total_input_tokens == 14
+    assert result.embedding_cache_hit_count == 0
+    assert result.embedding_cache_miss_count == 0
+    assert result.embedding_cache_bypass_count == 0
     assert document.ingestion_status == "embedded"
     assert all(chunk.embedding is not None for chunk in document.chunks)
     assert all(chunk.embedding_model == "test-embedding-provider-v1" for chunk in document.chunks)
@@ -84,6 +87,53 @@ def test_embed_document_chunks_persists_missing_vectors() -> None:
         chunk.embedding_created_at is not None and chunk.embedding_created_at.tzinfo is UTC
         for chunk in document.chunks
     )
+    session.flush.assert_called_once()
+
+
+def test_embed_document_chunks_measures_cache_usage_and_fresh_provider_tokens() -> None:
+    session = Mock()
+    provider = Mock()
+    document = make_document(chunk_count=3)
+
+    provider.embed.side_effect = [
+        EmbeddingResult(
+            vector=[0.1] * TEST_EMBEDDING_DIMENSIONS,
+            input_text_token_count=11,
+            model_id="test-embedding-provider-v1",
+            cache_status="MISS",
+        ),
+        EmbeddingResult(
+            vector=[0.2] * TEST_EMBEDDING_DIMENSIONS,
+            input_text_token_count=7,
+            model_id="test-embedding-provider-v1",
+            cache_status="HIT",
+        ),
+        EmbeddingResult(
+            vector=[0.3] * TEST_EMBEDDING_DIMENSIONS,
+            input_text_token_count=13,
+            model_id="test-embedding-provider-v1",
+            cache_status="BYPASS",
+        ),
+    ]
+
+    result = embed_document_chunks(
+        session=session,
+        document=document,
+        provider=provider,
+    )
+
+    assert result.embedded_chunk_count == 3
+    assert result.embedding_cache_hit_count == 1
+    assert result.embedding_cache_miss_count == 1
+    assert result.embedding_cache_bypass_count == 1
+
+    # Only MISS and BYPASS invoked the underlying provider during this run.
+    assert result.total_input_tokens == 24
+
+    # Each chunk still retains the original token metadata for its embedding.
+    assert [chunk.embedding_token_count for chunk in document.chunks] == [11, 7, 13]
+
+    assert provider.embed.call_count == 3
     session.flush.assert_called_once()
 
 

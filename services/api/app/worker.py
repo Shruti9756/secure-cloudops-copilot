@@ -13,7 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import get_settings
 from app.db.models import KnowledgeDocument, Tenant
 from app.db.session import get_session_factory
-from app.infrastructure.ollama import OllamaEmbeddingClient
+from app.infrastructure.ollama import (
+    OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
+    OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
+    OllamaEmbeddingClient,
+)
 from app.infrastructure.redis import get_redis_client
 from app.services.chunking import replace_document_chunks
 from app.services.document_job_status import (
@@ -36,6 +40,10 @@ from app.services.document_retry import (
     clear_processing_failure,
     record_processing_failure,
 )
+from app.services.embedding_cache import (
+    CachedEmbeddingProvider,
+    EmbeddingCacheClient,
+)
 from app.services.embedding_persistence import embed_document_chunks
 from app.services.embeddings import EmbeddingProvider
 
@@ -44,6 +52,19 @@ LOGGER = logging.getLogger(__name__)
 
 class DocumentWorkerRedisClient(DocumentLockClient, DocumentJobStatusClient, Protocol):
     """Redis operations required by document locking and progress reporting."""
+
+
+def build_worker_embedding_provider(
+    *,
+    redis_client: EmbeddingCacheClient,
+) -> EmbeddingProvider:
+    """Build the worker embedding provider with validated Redis caching."""
+    return CachedEmbeddingProvider(
+        provider=OllamaEmbeddingClient(),
+        cache=redis_client,
+        model_id=OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
+        dimensions=OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
+    )
 
 
 @dataclass(frozen=True)
@@ -56,6 +77,9 @@ class ProcessingCycleResult:
     embedded_chunks: int
     skipped_chunks: int
     input_tokens: int
+    embedding_cache_hits: int = 0
+    embedding_cache_misses: int = 0
+    embedding_cache_bypasses: int = 0
 
     @property
     def has_work(self) -> bool:
@@ -71,6 +95,9 @@ EMPTY_PROCESSING_CYCLE_RESULT = ProcessingCycleResult(
     embedded_chunks=0,
     skipped_chunks=0,
     input_tokens=0,
+    embedding_cache_hits=0,
+    embedding_cache_misses=0,
+    embedding_cache_bypasses=0,
 )
 
 
@@ -134,6 +161,9 @@ def _summarize_processing_results(
         embedded_chunks=sum(result.embedded_chunks for result in results),
         skipped_chunks=sum(result.skipped_chunks for result in results),
         input_tokens=sum(result.input_tokens for result in results),
+        embedding_cache_hits=sum(result.embedding_cache_hits for result in results),
+        embedding_cache_misses=sum(result.embedding_cache_misses for result in results),
+        embedding_cache_bypasses=sum(result.embedding_cache_bypasses for result in results),
     )
 
 
@@ -247,6 +277,9 @@ def process_document(
         embedded_chunks=embedding_result.embedded_chunk_count,
         skipped_chunks=embedding_result.skipped_chunk_count,
         input_tokens=embedding_result.total_input_tokens,
+        embedding_cache_hits=embedding_result.embedding_cache_hit_count,
+        embedding_cache_misses=embedding_result.embedding_cache_miss_count,
+        embedding_cache_bypasses=embedding_result.embedding_cache_bypass_count,
     )
 
 
@@ -475,7 +508,9 @@ def main() -> None:
     settings = get_settings()
     session_factory = get_session_factory()
     redis_client = get_redis_client()
-    provider = OllamaEmbeddingClient()
+    provider = build_worker_embedding_provider(
+        redis_client=redis_client,
+    )
     tenant_scope = settings.document_processor_tenant_slug
 
     if tenant_scope is not None:
@@ -508,12 +543,17 @@ def main() -> None:
                     "Document processing cycle completed: "
                     "chunked_documents=%s chunks_created=%s "
                     "embedded_documents=%s embedded_chunks=%s "
-                    "skipped_chunks=%s input_tokens=%s",
+                    "skipped_chunks=%s embedding_cache_hits=%s "
+                    "embedding_cache_misses=%s embedding_cache_bypasses=%s "
+                    "provider_input_tokens=%s",
                     result.chunked_documents,
                     result.chunks_created,
                     result.embedded_documents,
                     result.embedded_chunks,
                     result.skipped_chunks,
+                    result.embedding_cache_hits,
+                    result.embedding_cache_misses,
+                    result.embedding_cache_bypasses,
                     result.input_tokens,
                 )
 

@@ -6,12 +6,17 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.db.models import KnowledgeDocument
+from app.infrastructure.ollama import (
+    OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
+    OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
+)
 from app.services.chunking import ChunkingResult
 from app.services.document_lock import DocumentLockLease
 from app.services.embedding_persistence import DocumentEmbeddingResult
 from app.worker import (
     EMPTY_PROCESSING_CYCLE_RESULT,
     ProcessingCycleResult,
+    build_worker_embedding_provider,
     claim_next_document,
     list_tenant_slugs_requiring_processing,
     process_all_tenant_documents,
@@ -48,6 +53,38 @@ def make_document(
     )
 
 
+def test_build_worker_embedding_provider_wraps_ollama_with_redis_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis_client = Mock()
+    ollama_provider = Mock()
+    cached_provider = Mock()
+    create_ollama_provider = Mock(return_value=ollama_provider)
+    create_cached_provider = Mock(return_value=cached_provider)
+
+    monkeypatch.setattr(
+        "app.worker.OllamaEmbeddingClient",
+        create_ollama_provider,
+    )
+    monkeypatch.setattr(
+        "app.worker.CachedEmbeddingProvider",
+        create_cached_provider,
+    )
+
+    result = build_worker_embedding_provider(
+        redis_client=redis_client,
+    )
+
+    assert result is cached_provider
+    create_ollama_provider.assert_called_once_with()
+    create_cached_provider.assert_called_once_with(
+        provider=ollama_provider,
+        cache=redis_client,
+        model_id=OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
+        dimensions=OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
+    )
+
+
 def test_process_document_chunks_then_embeds_pending_document(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -71,6 +108,9 @@ def test_process_document_chunks_then_embeds_pending_document(
         embedded_chunk_count=2,
         skipped_chunk_count=0,
         total_input_tokens=42,
+        embedding_cache_hit_count=1,
+        embedding_cache_miss_count=1,
+        embedding_cache_bypass_count=0,
     )
 
     chunk_document = Mock(return_value=chunking_result)
@@ -93,6 +133,9 @@ def test_process_document_chunks_then_embeds_pending_document(
         embedded_chunks=2,
         skipped_chunks=0,
         input_tokens=42,
+        embedding_cache_hits=1,
+        embedding_cache_misses=1,
+        embedding_cache_bypasses=0,
     )
     chunk_document.assert_called_once_with(
         session=session,
@@ -135,6 +178,9 @@ def test_process_document_embeds_chunked_document_without_rechunking(
             embedded_chunk_count=1,
             skipped_chunk_count=1,
             total_input_tokens=20,
+            embedding_cache_hit_count=0,
+            embedding_cache_miss_count=1,
+            embedding_cache_bypass_count=0,
         )
     )
 
@@ -155,6 +201,9 @@ def test_process_document_embeds_chunked_document_without_rechunking(
         embedded_chunks=1,
         skipped_chunks=1,
         input_tokens=20,
+        embedding_cache_hits=0,
+        embedding_cache_misses=1,
+        embedding_cache_bypasses=0,
     )
     chunk_document.assert_not_called()
     session.expire.assert_not_called()
@@ -726,6 +775,9 @@ def test_process_all_tenant_documents_aggregates_tenant_results(
         embedded_chunks=2,
         skipped_chunks=0,
         input_tokens=42,
+        embedding_cache_hits=1,
+        embedding_cache_misses=1,
+        embedding_cache_bypasses=0,
     )
     second_result = ProcessingCycleResult(
         chunked_documents=1,
@@ -734,6 +786,9 @@ def test_process_all_tenant_documents_aggregates_tenant_results(
         embedded_chunks=1,
         skipped_chunks=1,
         input_tokens=24,
+        embedding_cache_hits=0,
+        embedding_cache_misses=0,
+        embedding_cache_bypasses=1,
     )
 
     discover_tenants = Mock(return_value=["nimbuscart", "skyforge"])
@@ -759,6 +814,9 @@ def test_process_all_tenant_documents_aggregates_tenant_results(
         embedded_chunks=3,
         skipped_chunks=1,
         input_tokens=66,
+        embedding_cache_hits=1,
+        embedding_cache_misses=1,
+        embedding_cache_bypasses=1,
     )
     discover_tenants.assert_called_once_with(
         discovery_session,

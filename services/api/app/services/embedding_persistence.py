@@ -21,6 +21,9 @@ class DocumentEmbeddingResult:
     embedded_chunk_count: int
     skipped_chunk_count: int
     total_input_tokens: int
+    embedding_cache_hit_count: int = 0
+    embedding_cache_miss_count: int = 0
+    embedding_cache_bypass_count: int = 0
 
 
 def embed_document_chunks(
@@ -46,6 +49,9 @@ def embed_document_chunks(
     embedded_chunk_count = 0
     skipped_chunk_count = 0
     total_input_tokens = 0
+    embedding_cache_hit_count = 0
+    embedding_cache_miss_count = 0
+    embedding_cache_bypass_count = 0
 
     for chunk in chunks:
         # Existing vectors are kept during normal reruns to make the process idempotent.
@@ -64,7 +70,17 @@ def embed_document_chunks(
         chunk.embedding_created_at = datetime.now(UTC)
 
         embedded_chunk_count += 1
-        total_input_tokens += result.input_text_token_count
+
+        if result.cache_status == "HIT":
+            embedding_cache_hit_count += 1
+        elif result.cache_status == "MISS":
+            embedding_cache_miss_count += 1
+        elif result.cache_status == "BYPASS":
+            embedding_cache_bypass_count += 1
+
+        # A cache hit reuses previous work and consumes no new provider tokens.
+        if result.cache_status != "HIT":
+            total_input_tokens += result.input_text_token_count
 
     # A document is searchable only after every one of its chunks has a vector.
     document.ingestion_status = "embedded"
@@ -76,6 +92,9 @@ def embed_document_chunks(
         embedded_chunk_count=embedded_chunk_count,
         skipped_chunk_count=skipped_chunk_count,
         total_input_tokens=total_input_tokens,
+        embedding_cache_hit_count=embedding_cache_hit_count,
+        embedding_cache_miss_count=embedding_cache_miss_count,
+        embedding_cache_bypass_count=embedding_cache_bypass_count,
     )
 
 
