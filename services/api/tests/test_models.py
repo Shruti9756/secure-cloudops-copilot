@@ -88,3 +88,12 @@ def test_document_processing_retry_state_is_safely_constrained() -> None:
     assert next_attempt_column.nullable is True
     assert failure_reason_column.nullable is True
     assert failure_reason_column.type.length == 64
+
+
+def test_tenant_knowledge_revision_is_required_and_nonnegative() -> None:
+    revision_column = Tenant.__table__.c.knowledge_revision
+    constraint_names = {constraint.name for constraint in Tenant.__table__.constraints}
+
+    assert revision_column.nullable is False
+    assert str(revision_column.server_default.arg) == "0"
+    assert "ck_tenants_knowledge_revision_nonnegative" in constraint_names

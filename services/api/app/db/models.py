@@ -117,6 +117,12 @@ class Membership(Base):
 
 class Tenant(Base):
     __tablename__ = "tenants"
+    __table_args__ = (
+        CheckConstraint(
+            "knowledge_revision >= 0",
+            name="ck_tenants_knowledge_revision_nonnegative",
+        ),
+    )
 
     # A tenant is an isolated workspace inside one organization.
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -128,6 +134,11 @@ class Tenant(Base):
     )
     slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    knowledge_revision: Mapped[int] = mapped_column(
+        Integer,
+        server_default="0",
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
