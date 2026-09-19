@@ -1567,9 +1567,10 @@ def ask_question(
             ),
         )
 
-    # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
+    # The key is tenant-, revision-, and access-scoped and never exposes the raw question.
     cache_key = build_ask_response_cache_key(
         tenant_slug=tenant.slug,
+        knowledge_revision=tenant.knowledge_revision,
         document_access_levels=readable_document_access_levels,
         question=request.question,
         limit=request.limit,

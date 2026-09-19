@@ -112,6 +112,7 @@ def install_fake_dependencies(
             organization_id=uuid4(),
             slug="nimbuscart",
             name="NimbusCart",
+            knowledge_revision=0,
         )
 
     if database_session is None:
@@ -506,6 +507,7 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 
     expected_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
+        knowledge_revision=0,
         document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
@@ -522,6 +524,67 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
 
     # The second request used Redis and avoided a duplicate RAG/model call.
     rag_call.assert_called_once()
+
+
+def test_ask_endpoint_misses_cache_after_knowledge_revision_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache = FakeRedisCache()
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+        knowledge_revision=3,
+    )
+    question = "Why did checkout latency increase?"
+    rag_call = Mock(return_value=make_grounded_answer(make_lexical_only_source()))
+
+    install_fake_dependencies(
+        redis_cache=cache,
+        tenant=tenant,
+    )
+    monkeypatch.setattr("app.main.answer_grounded_question", rag_call)
+
+    try:
+        first_response = client.post(
+            "/api/v1/ask",
+            json={"question": question, "limit": 2},
+        )
+
+        tenant.knowledge_revision = 4
+
+        second_response = client.post(
+            "/api/v1/ask",
+            json={"question": question, "limit": 2},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    revision_three_key = build_ask_response_cache_key(
+        tenant_slug="nimbuscart",
+        knowledge_revision=3,
+        document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
+        question=question,
+        limit=2,
+    )
+    revision_four_key = build_ask_response_cache_key(
+        tenant_slug="nimbuscart",
+        knowledge_revision=4,
+        document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
+        question=question,
+        limit=2,
+    )
+
+    assert first_response.status_code == 200
+    assert first_response.headers["x-cache"] == "MISS"
+    assert second_response.status_code == 200
+    assert second_response.headers["x-cache"] == "MISS"
+
+    assert revision_three_key in cache.entries
+    assert revision_four_key in cache.entries
+    assert revision_three_key != revision_four_key
+    assert rag_call.call_count == 2
 
 
 def test_ask_endpoint_rejects_requests_after_the_rate_limit(
@@ -634,6 +697,7 @@ def test_ask_endpoint_records_safe_audit_metadata_after_a_cache_miss(
         organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
+        knowledge_revision=0,
     )
 
     install_fake_dependencies(
@@ -695,6 +759,7 @@ def test_ask_endpoint_audits_cache_hits_without_repeating_rag_work(
         organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
+        knowledge_revision=0,
     )
     cache = FakeRedisCache()
     rag_call = Mock(return_value=make_grounded_answer())
@@ -744,6 +809,7 @@ def test_ask_endpoint_audits_rate_limit_denials(
         organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
+        knowledge_revision=0,
     )
 
     cache = FakeRedisCache(rate_limit_result=(0, 10, 23, 1, 23))
@@ -817,6 +883,7 @@ def test_ask_endpoint_rejects_when_the_organization_budget_is_exhausted(
         organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
+        knowledge_revision=0,
     )
     cache = FakeRedisCache(rate_limit_result=(0, 9, 17, 100, 31))
     rag_call = Mock()
@@ -910,6 +977,7 @@ def test_ask_endpoint_records_actual_chat_model_token_usage(
         organization_id=uuid4(),
         slug="nimbuscart",
         name="NimbusCart",
+        knowledge_revision=0,
     )
     cache = FakeRedisCache()
     rag_call = Mock(return_value=make_grounded_answer())

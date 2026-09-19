@@ -46,6 +46,7 @@ from app.services.embedding_cache import (
 )
 from app.services.embedding_persistence import embed_document_chunks
 from app.services.embeddings import EmbeddingProvider
+from app.services.knowledge_revision import increment_knowledge_revision
 
 LOGGER = logging.getLogger(__name__)
 
@@ -269,7 +270,12 @@ def process_document(
 
     # A successful complete embedding invalidates old consecutive-failure state.
     clear_processing_failure(document)
-
+    # New searchable evidence invalidates answers cached while processing was incomplete.
+    increment_knowledge_revision(
+        session,
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+    )
     return ProcessingCycleResult(
         chunked_documents=chunked_documents,
         chunks_created=chunks_created,

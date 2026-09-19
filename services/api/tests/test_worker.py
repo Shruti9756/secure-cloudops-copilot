@@ -115,9 +115,14 @@ def test_process_document_chunks_then_embeds_pending_document(
 
     chunk_document = Mock(return_value=chunking_result)
     embed_document = Mock(return_value=embedding_result)
+    increment_revision = Mock(return_value=2)
 
     monkeypatch.setattr("app.worker.replace_document_chunks", chunk_document)
     monkeypatch.setattr("app.worker.embed_document_chunks", embed_document)
+    monkeypatch.setattr(
+        "app.worker.increment_knowledge_revision",
+        increment_revision,
+    )
 
     result = process_document(
         session=session,
@@ -155,6 +160,11 @@ def test_process_document_chunks_then_embeds_pending_document(
     assert document.processing_attempt_count == 0
     assert document.next_processing_attempt_at is None
     assert document.last_processing_failure_reason is None
+    increment_revision.assert_called_once_with(
+        session,
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+    )
 
 
 def test_process_document_embeds_chunked_document_without_rechunking(
@@ -183,9 +193,14 @@ def test_process_document_embeds_chunked_document_without_rechunking(
             embedding_cache_bypass_count=0,
         )
     )
+    increment_revision = Mock(return_value=2)
 
     monkeypatch.setattr("app.worker.replace_document_chunks", chunk_document)
     monkeypatch.setattr("app.worker.embed_document_chunks", embed_document)
+    monkeypatch.setattr(
+        "app.worker.increment_knowledge_revision",
+        increment_revision,
+    )
 
     result = process_document(
         session=session,
@@ -216,6 +231,37 @@ def test_process_document_embeds_chunked_document_without_rechunking(
     assert document.processing_attempt_count == 0
     assert document.next_processing_attempt_at is None
     assert document.last_processing_failure_reason is None
+    increment_revision.assert_called_once_with(
+        session,
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+    )
+
+
+def test_process_document_does_not_increment_revision_when_embedding_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    document = make_document(ingestion_status="chunked")
+    increment_revision = Mock()
+
+    monkeypatch.setattr(
+        "app.worker.embed_document_chunks",
+        Mock(side_effect=RuntimeError("Embedding provider unavailable")),
+    )
+    monkeypatch.setattr(
+        "app.worker.increment_knowledge_revision",
+        increment_revision,
+    )
+
+    with pytest.raises(RuntimeError, match="Embedding provider unavailable"):
+        process_document(
+            session=session,
+            document=document,
+            provider=Mock(),
+        )
+
+    increment_revision.assert_not_called()
 
 
 def test_claim_next_document_rejects_an_empty_tenant_before_database_work() -> None:
