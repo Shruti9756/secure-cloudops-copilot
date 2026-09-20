@@ -8,9 +8,9 @@ Teams can upload synthetic runbooks, deployment records, Markdown, TXT, digital 
 
 ## Current status
 
-[V0.1.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.1.0) and [V0.2.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.2.0) are released.
+[V0.1.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.1.0), [V0.2.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.2.0), and [V0.3.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.3.0) are released.
 
-V0.3 is the current release-candidate milestone: **reliable, measurable RAG**. Its implementation and controlled evaluation are complete; release verification and pull-request closeout remain. V0.3 adds hybrid semantic and BM25 retrieval, reproducible retrieval and answer evaluation, resilient background ingestion, Redis locks and progress, layered limits and quotas, embedding caching, and evidence-backed chunking decisions.
+V0.3.0 is the current release: **reliable, measurable RAG**. It adds hybrid semantic and BM25 retrieval, reproducible retrieval and answer evaluation, resilient background ingestion, Redis locks and progress, layered limits and quotas, embedding caching, and evidence-backed chunking decisions.
 
 ## What works today
 
@@ -237,6 +237,8 @@ The latest local API suite completed with **459 passed, 1 deselected**. The live
 - [V0.1 demo script](docs/demo/v0.1-demo-script.md)
 - [V0.2 release checklist](docs/release/v0.2-release-checklist.md)
 - [V0.2 demo script](docs/demo/v0.2-demo-script.md)
+- [V0.3 release checklist](docs/release/v0.3-release-checklist.md)
+- [V0.3 demo script](docs/demo/v0.3-demo-script.md)
 - [V0.3 evaluation report](docs/evaluation/v0.3-evaluation-report.md)
 - [Security threat model](docs/security/threat-model-v1.md)
 - [Versioned roadmap](VERSIONED_ROADMAP.md)

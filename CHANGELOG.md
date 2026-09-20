@@ -6,6 +6,8 @@ This project follows semantic versioning. The V0.x releases are learning and por
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-21
+
 ### Reliable ingestion and Redis
 
 - Added checksum-based idempotent background document processing with persisted attempt counts, bounded exponential retry, failure reasons, and terminal failure state.
