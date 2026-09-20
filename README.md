@@ -10,7 +10,7 @@ Teams can upload synthetic runbooks, deployment records, Markdown, TXT, digital 
 
 [V0.1.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.1.0) and [V0.2.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.2.0) are released.
 
-V0.2 is the current completed milestone: **multi-tenant secure RAG**. It adds Cognito authentication, organization and workspace isolation, role-based access control, document visibility levels, safer audit events, PII redaction, authorized S3 document downloads, and strict structured model-output validation.
+V0.3 is the current release-candidate milestone: **reliable, measurable RAG**. Its implementation and controlled evaluation are complete; release verification and pull-request closeout remain. V0.3 adds hybrid semantic and BM25 retrieval, reproducible retrieval and answer evaluation, resilient background ingestion, Redis locks and progress, layered limits and quotas, embedding caching, and evidence-backed chunking decisions.
 
 ## What works today
 
@@ -18,8 +18,14 @@ V0.2 is the current completed milestone: **multi-tenant secure RAG**. It adds Co
 - FastAPI API with OpenAPI documentation
 - PostgreSQL + pgvector knowledge store
 - Redis response caching and request rate limiting
+- Layered per-user and per-organization request limits plus organization token quotas
+- Redis distributed document locks, live processing progress, and normalized-text embedding caching
+- Workspace-revision response-cache invalidation after knowledge changes
 - Local Ollama embeddings (mxbai-embed-large) and generation (qwen3:4b-instruct)
 - Cited RAG answers with relevance thresholds and safe insufficient-evidence responses
+- Hybrid semantic and custom BM25 retrieval using reciprocal-rank fusion
+- A versioned 50-question retrieval benchmark with precision, recall, latency, and token measurements
+- Versioned answer-quality and chunking-comparison evidence
 - Strict Pydantic structured-output validation for answer shape and citations before a model response is shown
 - Citation validation and deterministic output-safety validation
 - Prompt-injection detection for user questions and suspicious retrieved evidence
@@ -54,11 +60,12 @@ flowchart LR
     API -->|verify JWT| Cognito
     API -->|user + membership + role check| DB["PostgreSQL + pgvector"]
 
-    API --> Redis["Redis: cache + rate limits"]
+    API --> Redis["Redis: cache + rate limits + quotas + job state"]
     API --> Ollama["Ollama: embeddings + chat"]
     API --> S3["Private S3: redacted extracted text"]
 
     Worker["Background worker"] --> DB
+    Worker --> Redis
     Worker --> Ollama
 
     MCP["Read-only MCP server"] --> API
@@ -87,6 +94,7 @@ flowchart LR
     Redact --> Database["Store document metadata + redacted content"]
     Redact --> S3["Optional private S3 redacted-text mirror"]
     Database --> Worker["Background worker"]
+    Worker --> RedisState["Redis lock + job progress + embedding cache"]
     Worker --> Chunk["Chunk document"]
     Chunk --> Embed["Create Ollama embeddings"]
     Embed --> Search["Organization and role-scoped retrieval"]
@@ -94,6 +102,14 @@ flowchart LR
 ~~~
 
 The worker processes pending work across all workspaces. Retrieval filters organization and document access level before a response is generated. A cache key includes the caller's access scope, so a broader answer cannot be reused for a less-privileged caller.
+
+## V0.3 measured RAG results
+
+On the controlled 50-question corpus, hybrid retrieval improved mean Recall@3 from **0.880** to **0.980** compared with semantic retrieval. The post-integration eight-case answer suite retained **1.000** outcome accuracy, citation correctness, abstention correctness, and overall pass rate.
+
+The evaluated `600/100` chunking profile produced 71.429% more chunks and lower Recall@3 than the current `1200/200` profile, so the current profile remains the default.
+
+These measurements are synthetic local-development evidence, not production performance guarantees. See the [V0.3 evaluation report](docs/evaluation/v0.3-evaluation-report.md) for quality, latency, token, and limitation details.
 
 ## Local setup
 
@@ -109,7 +125,7 @@ The worker processes pending work across all workspaces. Retrieval filters organ
 
 ~~~powershell
 Copy-Item .env.example .env
-Copy-Item apps\web\.env.local.example apps\web\.env.local
+Copy-Item apps\web\.env.example apps\web\.env.local
 docker compose up -d --build
 docker compose exec ollama ollama pull mxbai-embed-large
 docker compose exec ollama ollama pull qwen3:4b-instruct
@@ -177,8 +193,9 @@ For local Docker development, the Compose configuration may mount the developer'
 | POST /api/v1/identity/session | Records a safe audit event after an accepted authenticated session. |
 | GET /api/v1/workspaces | Returns the caller's authorized workspaces and roles. |
 | POST /api/v1/ask | Returns a cited grounded answer, safe refusal, or guarded validation outcome. |
-| GET /api/v1/documents | Lists document status for the active authorized workspace. |
+| GET /api/v1/documents | Lists document status and live processing progress for the active authorized workspace. |
 | POST /api/v1/documents | Uploads a document when the caller has documents:write. |
+| POST /api/v1/documents/retry | Schedules an authorized retry for a failed document-processing job. |
 | GET /api/v1/documents/download?source_path=... | Produces an authorized short-lived download link for a redacted S3 object. |
 | GET /api/v1/deployments/{service}/{version} | Returns authorized deployment context. |
 | GET /api/v1/runbooks/{runbook_name} | Returns authorized runbook context. |
@@ -203,7 +220,7 @@ terraform fmt -check
 terraform validate
 ~~~
 
-The latest local API suite completed with **232 passed, 1 deselected**. The live Docker/Ollama end-to-end test remains opt-in because local generation performance depends on the host machine.
+The latest local API suite completed with **459 passed, 1 deselected**. The live Docker/Ollama end-to-end test remains opt-in because local generation performance depends on the host machine.
 
 ## Security boundaries and current limitations
 
@@ -220,5 +237,6 @@ The latest local API suite completed with **232 passed, 1 deselected**. The live
 - [V0.1 demo script](docs/demo/v0.1-demo-script.md)
 - [V0.2 release checklist](docs/release/v0.2-release-checklist.md)
 - [V0.2 demo script](docs/demo/v0.2-demo-script.md)
+- [V0.3 evaluation report](docs/evaluation/v0.3-evaluation-report.md)
 - [Security threat model](docs/security/threat-model-v1.md)
 - [Versioned roadmap](VERSIONED_ROADMAP.md)

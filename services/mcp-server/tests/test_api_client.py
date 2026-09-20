@@ -144,6 +144,43 @@ def test_adapter_calls_only_the_fixed_guarded_ask_endpoint() -> None:
     assert transport.get_calls == []
 
 
+def test_adapter_accepts_a_lexical_only_source_without_a_fake_distance() -> None:
+    transport = FakeJsonHttpTransport(
+        post_response=JsonHttpResponse(
+            status_code=200,
+            payload={
+                "status": "grounded",
+                "answer": "Inspect the exact incident identifier.",
+                "tenant": "nimbuscart",
+                "embedding_model": "mxbai-embed-large",
+                "generation_model": "qwen3:4b-instruct",
+                "sources": [
+                    {
+                        "source_identifier": "runbooks/payments-latency.md#chunk-0",
+                        "document_title": "Runbook: Payments Latency",
+                        "cosine_distance": None,
+                    }
+                ],
+            },
+            headers={"x-cache": "MISS"},
+        )
+    )
+    client = SecureCloudOpsApiClient(transport=transport)
+
+    answer = client.ask(
+        question="What should I inspect for the payments incident?",
+        limit=1,
+    )
+
+    assert answer.sources == (
+        ApiSource(
+            source_identifier="runbooks/payments-latency.md#chunk-0",
+            document_title="Runbook: Payments Latency",
+            cosine_distance=None,
+        ),
+    )
+
+
 def test_adapter_preserves_a_safe_rate_limit_rejection() -> None:
     transport = FakeJsonHttpTransport(
         post_response=JsonHttpResponse(

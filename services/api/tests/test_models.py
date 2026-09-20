@@ -73,3 +73,27 @@ def test_document_access_level_is_constrained_and_defaults_to_organization() -> 
     assert "ck_knowledge_documents_access_level" in constraint_names
     assert access_level_column.nullable is False
     assert str(access_level_column.server_default.arg) == "organization"
+
+
+def test_document_processing_retry_state_is_safely_constrained() -> None:
+    constraint_names = {constraint.name for constraint in KnowledgeDocument.__table__.constraints}
+    attempt_count_column = KnowledgeDocument.__table__.c.processing_attempt_count
+    next_attempt_column = KnowledgeDocument.__table__.c.next_processing_attempt_at
+    failure_reason_column = KnowledgeDocument.__table__.c.last_processing_failure_reason
+
+    assert "ck_knowledge_documents_ingestion_status" in constraint_names
+    assert "ck_knowledge_documents_processing_attempt_count_nonnegative" in constraint_names
+    assert attempt_count_column.nullable is False
+    assert str(attempt_count_column.server_default.arg) == "0"
+    assert next_attempt_column.nullable is True
+    assert failure_reason_column.nullable is True
+    assert failure_reason_column.type.length == 64
+
+
+def test_tenant_knowledge_revision_is_required_and_nonnegative() -> None:
+    revision_column = Tenant.__table__.c.knowledge_revision
+    constraint_names = {constraint.name for constraint in Tenant.__table__.constraints}
+
+    assert revision_column.nullable is False
+    assert str(revision_column.server_default.arg) == "0"
+    assert "ck_tenants_knowledge_revision_nonnegative" in constraint_names

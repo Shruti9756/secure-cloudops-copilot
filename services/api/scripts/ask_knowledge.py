@@ -58,6 +58,14 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def format_source_match(cosine_distance: float | None) -> str:
+    """Describe source matching without inventing a semantic score."""
+    if cosine_distance is None:
+        return "lexical-only match"
+
+    return f"semantic distance: {cosine_distance:.4f}"
+
+
 def print_grounded_answer(tenant_slug: str, answer: GroundedAnswer) -> None:
     """Print the answer and source traceability without displaying raw vector data."""
     print(f"Tenant: {tenant_slug}")
@@ -85,7 +93,7 @@ def print_grounded_answer(tenant_slug: str, answer: GroundedAnswer) -> None:
     for source in answer.sources:
         print(
             f"- {source.source_path}#chunk-{source.chunk_index} "
-            f"(cosine distance: {source.cosine_distance:.4f})"
+            f"({format_source_match(source.cosine_distance)})"
         )
 
     print()

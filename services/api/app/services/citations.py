@@ -1,12 +1,18 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-
-from app.services.retrieval import RetrievedChunk
+from typing import Protocol
 
 # Matches citations such as:
 # [source: deployments/checkout-2.4.0.md#chunk-0]
 SOURCE_CITATION_PATTERN = re.compile(r"\[source:\s*(?P<source_identifier>[^\]]+?)\s*\]")
+
+
+class CitableChunk(Protocol):
+    """Minimum source metadata required for citation validation."""
+
+    source_path: str
+    chunk_index: int
 
 
 @dataclass(frozen=True)
@@ -18,14 +24,14 @@ class CitationValidationResult:
     errors: tuple[str, ...]
 
 
-def source_identifier_for_chunk(chunk: RetrievedChunk) -> str:
+def source_identifier_for_chunk(chunk: CitableChunk) -> str:
     """Build the one citation identifier that a retrieved chunk is allowed to use."""
     return f"{chunk.source_path}#chunk-{chunk.chunk_index}"
 
 
 def validate_answer_citations(
     answer_text: str,
-    retrieved_chunks: Sequence[RetrievedChunk],
+    retrieved_chunks: Sequence[CitableChunk],
 ) -> CitationValidationResult:
     """Ensure an answer cites only the chunks retrieved for this request."""
     normalized_answer = answer_text.strip()

@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable, Iterator
+from datetime import datetime
 from functools import lru_cache
 from time import perf_counter
 from typing import Annotated, Literal
@@ -39,6 +40,7 @@ from app.infrastructure.ollama_chat import OllamaChatClient
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.infrastructure.s3 import S3DocumentStorageUnavailableError
+from app.services.answer_status import AnswerStatus, get_answer_status
 from app.services.audit import AuditOutcome, record_audit_event
 from app.services.authorization import (
     AuthenticatedPrincipal,
@@ -56,6 +58,12 @@ from app.services.document_access import (
     DocumentAccessLevel,
     get_readable_document_access_levels,
 )
+from app.services.document_job_status import (
+    DocumentJobStage,
+    DocumentJobStatusLookup,
+    load_document_job_statuses,
+)
+from app.services.document_retry import reset_failed_document_for_retry
 from app.services.document_storage import (
     RedactedDocumentStore,
     get_redacted_document_store,
@@ -75,8 +83,10 @@ from app.services.metrics import (
 from app.services.prompt_injection import detect_prompt_injection
 from app.services.rag import GroundedAnswer, answer_grounded_question
 from app.services.rate_limit import (
-    build_rate_limit_key,
-    check_rate_limit,
+    LayeredRateLimitResult,
+    build_organization_rate_limit_key,
+    build_user_rate_limit_key,
+    check_layered_rate_limit,
 )
 from app.services.response_cache import (
     build_ask_response_cache_key,
@@ -84,6 +94,12 @@ from app.services.response_cache import (
     store_cached_response,
 )
 from app.services.retrieval import DEFAULT_RETRIEVAL_LIMIT, MAX_RETRIEVAL_LIMIT
+from app.services.token_quota import (
+    OrganizationTokenQuotaStatus,
+    build_organization_token_quota_key,
+    get_organization_token_quota_status,
+    record_organization_token_usage,
+)
 from app.services.upload_validation import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     validate_and_extract_upload,
@@ -142,19 +158,13 @@ class RetrievedSourceResponse(BaseModel):
 
     source_identifier: str
     document_title: str
-    cosine_distance: float
+    cosine_distance: float | None
 
 
 class AskResponse(BaseModel):
     """A grounded RAG answer plus traceability and local-model usage metadata."""
 
-    status: Literal[
-        "grounded",
-        "insufficient_evidence",
-        "structured_output_validation_failed",
-        "citation_validation_failed",
-        "safety_validation_failed",
-    ]
+    status: AnswerStatus
     answer: str
     tenant: str
     embedding_model: str
@@ -180,6 +190,16 @@ class DocumentUploadResponse(BaseModel):
     source_path: str
 
 
+class DocumentRetryResponse(BaseModel):
+    """Confirmation that a failed document was returned to the worker queue."""
+
+    status: Literal["accepted"]
+    action: Literal["retry_scheduled"]
+    tenant: str
+    source_path: str
+    ingestion_status: Literal["pending"]
+
+
 class DocumentDownloadResponse(BaseModel):
     """A short-lived, server-authorized URL for redacted document text."""
 
@@ -188,12 +208,20 @@ class DocumentDownloadResponse(BaseModel):
     expires_in_seconds: int
 
 
+class DocumentProcessingProgressResponse(BaseModel):
+    """Safe best-effort worker progress loaded from short-lived Redis state."""
+
+    stage: DocumentJobStage
+    updated_at: datetime
+
+
 class DocumentStatusItemResponse(BaseModel):
     """Safe lifecycle information for one tenant-scoped knowledge document."""
 
     source_path: str
     title: str
-    ingestion_status: Literal["pending", "chunked", "embedded"]
+    ingestion_status: Literal["pending", "chunked", "embedded", "failed"]
+    processing_progress: DocumentProcessingProgressResponse | None = None
 
 
 class DocumentStatusListResponse(BaseModel):
@@ -263,6 +291,14 @@ app.add_middleware(
         "X-RateLimit-Limit",
         "X-RateLimit-Remaining",
         "X-RateLimit-Reset",
+        "X-Organization-RateLimit-Limit",
+        "X-Organization-RateLimit-Remaining",
+        "X-Organization-RateLimit-Reset",
+        "X-Organization-Token-Quota-Limit",
+        "X-Organization-Token-Quota-Used",
+        "X-Organization-Token-Quota-Remaining",
+        "X-Organization-Token-Quota-Reset",
+        "X-RateLimit-Scope",
         "X-Request-ID",
     ],
 )
@@ -510,42 +546,58 @@ def get_chat_provider() -> OllamaChatClient:
 
 
 def get_redis_cache() -> Redis:
-    """Provide Redis for short-lived response caching; tests override it."""
+    """Provide Redis for short-lived application state; tests override it."""
     return get_redis_client()
 
 
-def get_client_identifier(request: Request) -> str:
-    """Return the direct client identity without trusting spoofable proxy headers."""
-    if request.client is None:
-        return "unknown-client"
+def _build_rate_limit_headers(
+    rate_limit: LayeredRateLimitResult,
+) -> dict[str, str]:
+    """Build safe headers for both rate-limit scopes."""
+    return {
+        "X-RateLimit-Limit": str(rate_limit.user.limit),
+        "X-RateLimit-Remaining": str(rate_limit.user.remaining),
+        "X-RateLimit-Reset": str(rate_limit.user.reset_after_seconds),
+        "X-Organization-RateLimit-Limit": str(rate_limit.organization.limit),
+        "X-Organization-RateLimit-Remaining": str(rate_limit.organization.remaining),
+        "X-Organization-RateLimit-Reset": str(rate_limit.organization.reset_after_seconds),
+    }
 
-    # We will configure trusted proxy handling explicitly before using AWS-forwarded IPs.
-    return request.client.host
+
+def _build_token_quota_headers(
+    quota_status: OrganizationTokenQuotaStatus,
+) -> dict[str, str]:
+    """Build safe organization token-quota response headers."""
+    return {
+        "X-Organization-Token-Quota-Limit": str(quota_status.token_limit),
+        "X-Organization-Token-Quota-Used": str(quota_status.used_tokens),
+        "X-Organization-Token-Quota-Remaining": str(quota_status.remaining_tokens),
+        "X-Organization-Token-Quota-Reset": str(quota_status.reset_after_seconds),
+    }
 
 
-def get_answer_status(
-    answer: GroundedAnswer,
-) -> Literal[
-    "grounded",
-    "insufficient_evidence",
-    "structured_output_validation_failed",
-    "citation_validation_failed",
-    "safety_validation_failed",
-]:
-    """Map internal RAG outcomes to a stable, client-safe API status."""
-    if not answer.sources:
-        return "insufficient_evidence"
+def _rate_limit_retry_after_seconds(
+    rate_limit: LayeredRateLimitResult,
+) -> int:
+    """Return the reset time for the budget that caused the denial."""
+    reset_after_seconds = 0
 
-    if answer.structured_output_validation_passed is False:
-        return "structured_output_validation_failed"
+    if rate_limit.blocked_scope in {"user", "user_and_organization"}:
+        reset_after_seconds = max(
+            reset_after_seconds,
+            rate_limit.user.reset_after_seconds,
+        )
 
-    if answer.citation_validation is not None and not answer.citation_validation.is_valid:
-        return "citation_validation_failed"
+    if rate_limit.blocked_scope in {
+        "organization",
+        "user_and_organization",
+    }:
+        reset_after_seconds = max(
+            reset_after_seconds,
+            rate_limit.organization.reset_after_seconds,
+        )
 
-    if answer.safety_validation is not None and not answer.safety_validation.is_safe:
-        return "safety_validation_failed"
-
-    return "grounded"
+    return max(reset_after_seconds, 1)
 
 
 def build_ask_response(
@@ -641,6 +693,10 @@ def record_ask_audit_event(
     audit_status: str,
     cache_status: str | None,
     rate_limit_remaining: int | None,
+    organization_rate_limit_remaining: int | None = None,
+    rate_limit_scope: str | None = None,
+    organization_token_quota_used: int | None = None,
+    organization_token_quota_remaining: int | None = None,
     ask_response: AskResponse | None = None,
     prompt_injection_rule_ids: tuple[str, ...] = (),
 ) -> None:
@@ -662,6 +718,17 @@ def record_ask_audit_event(
         ),
         "rate_limit_remaining": rate_limit_remaining,
     }
+    if organization_rate_limit_remaining is not None:
+        metadata["organization_rate_limit_remaining"] = organization_rate_limit_remaining
+
+    if rate_limit_scope is not None:
+        metadata["rate_limit_scope"] = rate_limit_scope
+
+    if organization_token_quota_used is not None:
+        metadata["organization_token_quota_used"] = organization_token_quota_used
+
+    if organization_token_quota_remaining is not None:
+        metadata["organization_token_quota_remaining"] = organization_token_quota_remaining
 
     if prompt_injection_rule_ids:
         # Rule IDs are bounded application constants; never record the raw question.
@@ -709,6 +776,34 @@ def record_document_upload_audit_event(
             "source_path": source_path,
             "content_type": content_type,
             "ingestion_action": ingestion_action,
+        },
+    )
+
+
+def record_document_retry_audit_event(
+    session: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    tenant: Tenant,
+    request_id: str,
+    outcome: AuditOutcome,
+    retry_status: str,
+    source_path: str,
+) -> None:
+    """Record a safe document-retry outcome."""
+    actor_type, actor_id = get_audit_actor(principal)
+
+    record_audit_event(
+        session,
+        tenant=tenant,
+        event_type="document.retry",
+        outcome=outcome,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        request_id=request_id,
+        metadata={
+            "retry_status": retry_status,
+            "source_path": source_path,
         },
     )
 
@@ -974,6 +1069,7 @@ def list_document_statuses(
         AuthorizedTenant,
         Depends(get_authorized_knowledge_access),
     ],
+    redis_client: Annotated[Redis, Depends(get_redis_cache)],
 ) -> DocumentStatusListResponse:
     """List safe processing statuses for documents in the server-controlled tenant."""
     tenant = authorized_tenant.tenant
@@ -991,17 +1087,125 @@ def list_document_statuses(
     )
     documents = list(session.scalars(statement))
 
-    # Never expose document content, chunks, vectors, hashes, or redaction metadata here.
-    return DocumentStatusListResponse(
-        tenant=tenant.slug,
-        documents=[
+    processing_statuses = load_document_job_statuses(
+        redis_client,
+        organization_id=tenant.organization_id,
+        tenant_id=tenant.id,
+        lookups=tuple(
+            DocumentJobStatusLookup(
+                document_id=document.id,
+                expected_source_sha256=document.source_sha256,
+                expected_processing_attempt_count=document.processing_attempt_count,
+            )
+            for document in documents
+        ),
+    )
+
+    response_documents: list[DocumentStatusItemResponse] = []
+
+    for document, processing_status in zip(
+        documents,
+        processing_statuses,
+        strict=True,
+    ):
+        response_documents.append(
             DocumentStatusItemResponse(
                 source_path=document.source_path,
                 title=document.title,
                 ingestion_status=document.ingestion_status,
+                processing_progress=(
+                    DocumentProcessingProgressResponse(
+                        stage=processing_status.stage,
+                        updated_at=processing_status.updated_at,
+                    )
+                    if processing_status is not None
+                    else None
+                ),
             )
-            for document in documents
-        ],
+        )
+
+    # Never expose document content, chunks, vectors, hashes, or redaction metadata here.
+    return DocumentStatusListResponse(
+        tenant=tenant.slug,
+        documents=response_documents,
+    )
+
+
+@app.post(
+    "/api/v1/documents/retry",
+    response_model=DocumentRetryResponse,
+    tags=["documents"],
+)
+def retry_document(
+    http_request: Request,
+    source_path: Annotated[str, Query(min_length=1, max_length=1024)],
+    session: Annotated[Session, Depends(get_database_session)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(get_current_principal)],
+    tenant: Annotated[Tenant, Depends(get_authorized_document_write_tenant)],
+) -> DocumentRetryResponse:
+    """Authorize and requeue one failed document for worker processing."""
+    statement = (
+        select(KnowledgeDocument)
+        .where(
+            KnowledgeDocument.tenant_id == tenant.id,
+            KnowledgeDocument.organization_id == tenant.organization_id,
+            KnowledgeDocument.source_path == source_path,
+        )
+        .with_for_update()
+    )
+    document = session.scalar(statement)
+
+    if document is None:
+        record_document_retry_audit_event(
+            session,
+            principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            outcome="denied",
+            retry_status="document_not_found",
+            source_path=source_path,
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Requested document is not available.",
+        )
+
+    if document.ingestion_status != "failed":
+        record_document_retry_audit_event(
+            session,
+            principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            outcome="denied",
+            retry_status="document_not_failed",
+            source_path=source_path,
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only failed documents can be retried.",
+        )
+
+    reset_failed_document_for_retry(document)
+
+    record_document_retry_audit_event(
+        session,
+        principal,
+        tenant=tenant,
+        request_id=http_request.state.request_id,
+        outcome="succeeded",
+        retry_status="accepted",
+        source_path=source_path,
+    )
+    session.commit()
+
+    return DocumentRetryResponse(
+        status="accepted",
+        action="retry_scheduled",
+        tenant=tenant.slug,
+        source_path=document.source_path,
+        ingestion_status="pending",
     )
 
 
@@ -1266,14 +1470,19 @@ def ask_question(
         )
 
     settings = get_settings()
-    rate_limit_key = build_rate_limit_key(
-        tenant_slug=tenant.slug,
-        client_identifier=get_client_identifier(http_request),
+    user_rate_limit_key = build_user_rate_limit_key(
+        organization_id=tenant.organization_id,
+        user_id=principal.user_id,
     )
-    rate_limit = check_rate_limit(
+    organization_rate_limit_key = build_organization_rate_limit_key(
+        organization_id=tenant.organization_id,
+    )
+    rate_limit = check_layered_rate_limit(
         cache,
-        cache_key=rate_limit_key,
-        limit=settings.ask_rate_limit_requests,
+        user_cache_key=user_rate_limit_key,
+        organization_cache_key=organization_rate_limit_key,
+        user_limit=settings.ask_user_rate_limit_requests,
+        organization_limit=settings.ask_organization_rate_limit_requests,
         window_seconds=settings.ask_rate_limit_window_seconds,
     )
 
@@ -1314,22 +1523,21 @@ def ask_question(
             outcome="denied",
             audit_status="rate_limited",
             cache_status=None,
-            rate_limit_remaining=0,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
+            rate_limit_scope=rate_limit.blocked_scope,
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests. Retry after the current rate-limit window.",
             headers={
-                "Retry-After": str(rate_limit.reset_after_seconds),
-                "X-RateLimit-Limit": str(rate_limit.limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(rate_limit.reset_after_seconds),
+                "Retry-After": str(_rate_limit_retry_after_seconds(rate_limit)),
+                **_build_rate_limit_headers(rate_limit),
+                "X-RateLimit-Scope": rate_limit.blocked_scope or "unknown",
             },
         )
 
-    response.headers["X-RateLimit-Limit"] = str(rate_limit.limit)
-    response.headers["X-RateLimit-Remaining"] = str(rate_limit.remaining)
-    response.headers["X-RateLimit-Reset"] = str(rate_limit.reset_after_seconds)
+    response.headers.update(_build_rate_limit_headers(rate_limit))
 
     prompt_injection_detection = detect_prompt_injection(request.question)
 
@@ -1347,7 +1555,8 @@ def ask_question(
             outcome="denied",
             audit_status="prompt_injection_detected",
             cache_status=None,
-            rate_limit_remaining=rate_limit.remaining,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
             prompt_injection_rule_ids=prompt_injection_detection.matched_rule_ids,
         )
         raise HTTPException(
@@ -1358,9 +1567,10 @@ def ask_question(
             ),
         )
 
-    # The key is tenant-scoped and hashes the question instead of exposing it in Redis.
+    # The key is tenant-, revision-, and access-scoped and never exposes the raw question.
     cache_key = build_ask_response_cache_key(
         tenant_slug=tenant.slug,
+        knowledge_revision=tenant.knowledge_revision,
         document_access_levels=readable_document_access_levels,
         question=request.question,
         limit=request.limit,
@@ -1394,7 +1604,8 @@ def ask_question(
                     outcome="succeeded",
                     audit_status="cache_hit",
                     cache_status="HIT",
-                    rate_limit_remaining=rate_limit.remaining,
+                    rate_limit_remaining=rate_limit.user.remaining,
+                    organization_rate_limit_remaining=rate_limit.organization.remaining,
                     ask_response=cached_response,
                     request_id=http_request.state.request_id,
                 )
@@ -1403,6 +1614,74 @@ def ask_question(
     # Redis problems never block incident investigation; they only disable caching.
     cache_status = "MISS" if cache_lookup.is_available else "BYPASS"
     response.headers["X-Cache"] = cache_status
+
+    organization_token_quota_key = build_organization_token_quota_key(
+        organization_id=tenant.organization_id,
+    )
+    token_quota_status = get_organization_token_quota_status(
+        cache,
+        cache_key=organization_token_quota_key,
+        token_limit=settings.ask_organization_token_quota_tokens,
+    )
+
+    if not token_quota_status.is_enforced:
+        observe_rag_request(
+            status="token_quota_unavailable",
+            cache_status=cache_status,
+        )
+        record_ask_audit_event(
+            session,
+            principal=principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            event_type="rag.answer_request",
+            outcome="failed",
+            audit_status="token_quota_unavailable",
+            cache_status=cache_status,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=("Model-usage protection is temporarily unavailable. Retry shortly."),
+            headers={
+                "Retry-After": "1",
+                **_build_rate_limit_headers(rate_limit),
+            },
+        )
+
+    if not token_quota_status.has_capacity:
+        observe_rag_request(
+            status="token_quota_exhausted",
+            cache_status=cache_status,
+        )
+        record_ask_audit_event(
+            session,
+            principal=principal,
+            tenant=tenant,
+            request_id=http_request.state.request_id,
+            event_type="rag.answer_request",
+            outcome="denied",
+            audit_status="token_quota_exhausted",
+            cache_status=cache_status,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
+            organization_token_quota_used=token_quota_status.used_tokens,
+            organization_token_quota_remaining=(token_quota_status.remaining_tokens),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Organization model-token quota is exhausted. Retry after the quota window resets."
+            ),
+            headers={
+                "Retry-After": str(max(token_quota_status.reset_after_seconds, 1)),
+                **_build_rate_limit_headers(rate_limit),
+                **_build_token_quota_headers(token_quota_status),
+            },
+        )
+
+    response.headers.update(_build_token_quota_headers(token_quota_status))
 
     try:
         answer = answer_grounded_question(
@@ -1428,7 +1707,8 @@ def ask_question(
             outcome="failed",
             audit_status="model_provider_unavailable",
             cache_status=response.headers["X-Cache"],
-            rate_limit_remaining=rate_limit.remaining,
+            rate_limit_remaining=rate_limit.user.remaining,
+            organization_rate_limit_remaining=rate_limit.organization.remaining,
             request_id=http_request.state.request_id,
         )
         raise HTTPException(
@@ -1441,6 +1721,45 @@ def ask_question(
         tenant=tenant,
     )
 
+    chat_model_token_count = (answer.prompt_token_count or 0) + (answer.completion_token_count or 0)
+
+    if chat_model_token_count > 0:
+        token_quota_status = record_organization_token_usage(
+            cache,
+            cache_key=organization_token_quota_key,
+            token_count=chat_model_token_count,
+            token_limit=settings.ask_organization_token_quota_tokens,
+            window_seconds=settings.ask_token_quota_window_seconds,
+        )
+
+        if not token_quota_status.is_enforced:
+            observe_rag_request(
+                status="token_quota_unavailable",
+                cache_status=cache_status,
+            )
+            record_ask_audit_event(
+                session,
+                principal=principal,
+                tenant=tenant,
+                request_id=http_request.state.request_id,
+                event_type="rag.answer_completed",
+                outcome="failed",
+                audit_status="token_quota_recording_unavailable",
+                cache_status=cache_status,
+                rate_limit_remaining=rate_limit.user.remaining,
+                organization_rate_limit_remaining=(rate_limit.organization.remaining),
+                ask_response=ask_response,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=("Model-usage accounting is temporarily unavailable. Retry shortly."),
+                headers={
+                    "Retry-After": "1",
+                    **_build_rate_limit_headers(rate_limit),
+                },
+            )
+
+        response.headers.update(_build_token_quota_headers(token_quota_status))
     observe_rag_request(
         status=ask_response.status,
         cache_status=cache_status,
@@ -1473,7 +1792,10 @@ def ask_question(
         outcome=audit_outcome,
         audit_status="completed",
         cache_status=response.headers["X-Cache"],
-        rate_limit_remaining=rate_limit.remaining,
+        rate_limit_remaining=rate_limit.user.remaining,
+        organization_rate_limit_remaining=rate_limit.organization.remaining,
+        organization_token_quota_used=token_quota_status.used_tokens,
+        organization_token_quota_remaining=token_quota_status.remaining_tokens,
         ask_response=ask_response,
         request_id=http_request.state.request_id,
     )

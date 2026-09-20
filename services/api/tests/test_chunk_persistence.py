@@ -2,9 +2,10 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.db.models import DocumentChunk, KnowledgeDocument
-from app.services.chunking import replace_document_chunks
+from app.services.chunking import chunk_pending_documents, replace_document_chunks
 
 
 def make_document(content: str) -> KnowledgeDocument:
@@ -87,3 +88,21 @@ def test_replace_document_chunks_keeps_existing_chunks_when_settings_are_invalid
     # Validate settings before deleting any derived records.
     session.execute.assert_not_called()
     session.flush.assert_not_called()
+
+
+def test_chunk_pending_documents_claims_work_with_skip_locked() -> None:
+    """Only one processor may claim a pending document at a time."""
+
+    session = Mock()
+    session.scalars.return_value = []
+
+    results = chunk_pending_documents(
+        session=session,
+        tenant_slug="nimbuscart",
+    )
+
+    statement = session.scalars.call_args.args[0]
+    statement_sql = str(statement.compile(dialect=postgresql.dialect()))
+
+    assert results == []
+    assert "FOR UPDATE OF knowledge_documents SKIP LOCKED" in statement_sql

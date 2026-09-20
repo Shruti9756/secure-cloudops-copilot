@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.ask_knowledge import parse_arguments
+from scripts.ask_knowledge import format_source_match, parse_arguments
 
 
 def test_parse_arguments_uses_safe_defaults() -> None:
@@ -36,3 +36,8 @@ def test_parse_arguments_rejects_an_out_of_range_limit() -> None:
                 "11",
             ]
         )
+
+
+def test_format_source_match_handles_both_retrieval_paths() -> None:
+    assert format_source_match(0.12345) == "semantic distance: 0.1235"
+    assert format_source_match(None) == "lexical-only match"

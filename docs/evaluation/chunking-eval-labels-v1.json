@@ -1,0 +1,225 @@
+{
+  "suite_name": "SecureCloudOps Chunking Evaluation Labels",
+  "suite_version": "v1",
+  "base_catalog": "docs/evaluation/retrieval-eval-cases-v1.json",
+  "profile_name": "smaller-600-100",
+  "max_chars": 600,
+  "overlap_chars": 100,
+  "cases": [
+    {
+      "id": "RET-EVAL-001",
+      "expected_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-1",
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-002",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-003",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-004",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-005",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-006",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-007",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-3"]
+    },
+    {
+      "id": "RET-EVAL-008",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-009",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-010",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-011",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-012",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-013",
+      "expected_source_identifiers": ["company-overview.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-014",
+      "expected_source_identifiers": ["company-overview.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-015",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-0",
+        "company-overview.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-016",
+      "expected_source_identifiers": ["company-overview.md#chunk-1"]
+    },
+    {
+      "id": "RET-EVAL-017",
+      "expected_source_identifiers": ["company-overview.md#chunk-1"]
+    },
+    {
+      "id": "RET-EVAL-018",
+      "expected_source_identifiers": ["company-overview.md#chunk-1"]
+    },
+    {
+      "id": "RET-EVAL-019",
+      "expected_source_identifiers": ["company-overview.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-020",
+      "expected_source_identifiers": ["company-overview.md#chunk-1"]
+    },
+    {
+      "id": "RET-EVAL-021",
+      "expected_source_identifiers": ["company-overview.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-022",
+      "expected_source_identifiers": ["company-overview.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-023",
+      "expected_source_identifiers": ["company-overview.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-024",
+      "expected_source_identifiers": ["company-overview.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-025",
+      "expected_source_identifiers": ["company-overview.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-026",
+      "expected_source_identifiers": [
+        "company-overview.md#chunk-2",
+        "company-overview.md#chunk-3"
+      ]
+    },
+    {
+      "id": "RET-EVAL-027",
+      "expected_source_identifiers": ["company-overview.md#chunk-3"]
+    },
+    {
+      "id": "RET-EVAL-028",
+      "expected_source_identifiers": ["company-overview.md#chunk-3"]
+    },
+    {
+      "id": "RET-EVAL-029",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-030",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-031",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-032",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-033",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-1"]
+    },
+    {
+      "id": "RET-EVAL-034",
+      "expected_source_identifiers": ["deployments/checkout-2.4.0.md#chunk-1"]
+    },
+    {
+      "id": "RET-EVAL-035",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-036",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-037",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-038",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-039",
+      "expected_source_identifiers": ["deployments/checkout-2.4.1.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-040",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-041",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-042",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-043",
+      "expected_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-0",
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "RET-EVAL-044",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-2"]
+    },
+    {
+      "id": "RET-EVAL-045",
+      "expected_source_identifiers": ["runbooks/checkout-latency.md#chunk-3"]
+    },
+    {
+      "id": "RET-EVAL-046",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-047",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-048",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-049",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    },
+    {
+      "id": "RET-EVAL-050",
+      "expected_source_identifiers": ["runbooks/payments-latency.md#chunk-0"]
+    }
+  ]
+}

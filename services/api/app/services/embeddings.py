@@ -1,5 +1,12 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
+
+EmbeddingCacheStatus = Literal[
+    "NOT_CHECKED",
+    "HIT",
+    "MISS",
+    "BYPASS",
+]
 
 
 @dataclass(frozen=True)
@@ -9,6 +16,7 @@ class EmbeddingResult:
     vector: list[float]
     input_text_token_count: int
     model_id: str
+    cache_status: EmbeddingCacheStatus = "NOT_CHECKED"
 
 
 class EmbeddingProvider(Protocol):

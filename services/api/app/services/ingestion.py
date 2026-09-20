@@ -14,6 +14,7 @@ from app.services.document_access import (
     DocumentAccessLevel,
 )
 from app.services.document_storage import RedactedDocumentStore
+from app.services.knowledge_revision import increment_knowledge_revision
 from app.services.redaction import RedactionResult, redact_sensitive_content
 
 IngestionAction = Literal["created", "updated", "unchanged"]
@@ -127,6 +128,11 @@ def ingest_document(
             return IngestionResult(action="unchanged", source_path=source_path)
 
         document.access_level = access_level
+        increment_knowledge_revision(
+            session,
+            organization_id=tenant.organization_id,
+            tenant_id=tenant.id,
+        )
         return IngestionResult(action="updated", source_path=source_path)
 
     storage_reference: S3DocumentReference | None = None
@@ -159,11 +165,18 @@ def ingest_document(
                 source_sha256=content_hash,
                 content=safe_content,
                 ingestion_status="pending",
+                processing_attempt_count=0,
+                next_processing_attempt_at=None,
+                last_processing_failure_reason=None,
                 access_level=resolved_access_level,
                 document_metadata=document_metadata,
             )
         )
-
+        increment_knowledge_revision(
+            session,
+            organization_id=tenant.organization_id,
+            tenant_id=tenant.id,
+        )
         return IngestionResult(action="created", source_path=source_path)
 
     fallback_title = Path(source_path).stem.replace("-", " ").replace("_", " ").title()
@@ -175,8 +188,15 @@ def ingest_document(
     # Existing chunks describe older content and must not be retrieved after an update.
     document.chunks.clear()
     document.ingestion_status = "pending"
+    document.processing_attempt_count = 0
+    document.next_processing_attempt_at = None
+    document.last_processing_failure_reason = None
     document.document_metadata = document_metadata
-
+    increment_knowledge_revision(
+        session,
+        organization_id=tenant.organization_id,
+        tenant_id=tenant.id,
+    )
     return IngestionResult(action="updated", source_path=source_path)
 
 

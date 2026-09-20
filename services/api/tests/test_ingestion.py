@@ -99,6 +99,9 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
     assert isinstance(stored_document, KnowledgeDocument)
     assert stored_document.access_level == "organization"
     assert stored_document.organization_id == tenant.organization_id
+    assert stored_document.processing_attempt_count == 0
+    assert stored_document.next_processing_attempt_at is None
+    assert stored_document.last_processing_failure_reason is None
     assert stored_document.title == "Checkout Runbook"
     assert stored_document.content == (
         "# Checkout Runbook\n\n"
@@ -123,7 +126,12 @@ def test_ingest_document_mirrors_only_redacted_content_when_store_is_configured(
     """Object storage receives safe text before the database receives the document."""
     session = Mock()
     session.scalar.return_value = None
-    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
     document_store = FakeRedactedDocumentStore()
 
     result = ingest_document(
@@ -209,7 +217,12 @@ def test_ingest_document_does_not_change_database_when_storage_mirror_fails() ->
     """A configured durable-storage failure must prevent a partial ingestion write."""
     session = Mock()
     session.scalar.return_value = None
-    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
     document_store = FakeRedactedDocumentStore(
         error=RuntimeError("S3 is unavailable"),
     )
@@ -224,12 +237,18 @@ def test_ingest_document_does_not_change_database_when_storage_mirror_fails() ->
         )
 
     session.add.assert_not_called()
+    session.execute.assert_not_called()
 
 
 def test_ingest_document_updates_access_level_without_reprocessing_same_content() -> None:
     """A visibility-only update keeps existing embeddings valid."""
     session = Mock()
-    tenant = Tenant(id=uuid4(), slug="nimbuscart", name="NimbusCart")
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
     content = "# Restricted Runbook\n\nInspect the database connection pool."
 
     existing_document = KnowledgeDocument(
@@ -256,3 +275,122 @@ def test_ingest_document_updates_access_level_without_reprocessing_same_content(
     assert existing_document.access_level == RESTRICTED_DOCUMENT_ACCESS
     assert existing_document.ingestion_status == "embedded"
     session.add.assert_not_called()
+
+
+def test_ingest_document_resets_retry_state_when_content_changes() -> None:
+    """New content receives a fresh processing and retry lifecycle."""
+    session = Mock()
+    organization_id = uuid4()
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=organization_id,
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    old_content = "# Old Runbook\n\nOld investigation steps."
+    new_content = "# Updated Runbook\n\nNew investigation steps."
+
+    existing_document = KnowledgeDocument(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        organization_id=organization_id,
+        title="Old Runbook",
+        source_path="runbooks/retry-demo.md",
+        source_sha256=calculate_content_sha256(old_content),
+        content=old_content,
+        ingestion_status="failed",
+        processing_attempt_count=5,
+        next_processing_attempt_at=None,
+        last_processing_failure_reason="provider_unavailable",
+        access_level="organization",
+        document_metadata={},
+    )
+    session.scalar.return_value = existing_document
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path="runbooks/retry-demo.md",
+        content=new_content,
+    )
+
+    assert result.action == "updated"
+    assert existing_document.content == new_content
+    assert existing_document.source_sha256 == calculate_content_sha256(new_content)
+    assert existing_document.ingestion_status == "pending"
+    assert existing_document.processing_attempt_count == 0
+    assert existing_document.next_processing_attempt_at is None
+    assert existing_document.last_processing_failure_reason is None
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_action", "should_increment"),
+    [
+        ("created", "created", True),
+        ("content_changed", "updated", True),
+        ("visibility_changed", "updated", True),
+        ("unchanged", "unchanged", False),
+    ],
+)
+def test_ingestion_increments_revision_only_for_knowledge_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    expected_action: str,
+    should_increment: bool,
+) -> None:
+    session = Mock()
+    tenant = Tenant(
+        id=uuid4(),
+        organization_id=uuid4(),
+        slug="nimbuscart",
+        name="NimbusCart",
+    )
+    source_path = "runbooks/revision-demo.md"
+    original_content = "# Revision Demo\n\nInspect the connection pool."
+
+    existing_document = KnowledgeDocument(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        organization_id=tenant.organization_id,
+        title="Revision Demo",
+        source_path=source_path,
+        source_sha256=calculate_content_sha256(original_content),
+        content=original_content,
+        ingestion_status="embedded",
+        access_level="organization",
+        document_metadata={},
+    )
+    session.scalar.return_value = None if scenario == "created" else existing_document
+
+    increment_revision = Mock(return_value=1)
+    monkeypatch.setattr(
+        "app.services.ingestion.increment_knowledge_revision",
+        increment_revision,
+    )
+
+    content = original_content
+    access_level = None
+    if scenario == "content_changed":
+        content = "# Revision Demo\n\nInspect the updated connection-pool settings."
+    elif scenario == "visibility_changed":
+        access_level = RESTRICTED_DOCUMENT_ACCESS
+
+    result = ingest_document(
+        session=session,
+        tenant=tenant,
+        source_path=source_path,
+        content=content,
+        access_level=access_level,
+    )
+
+    assert result.action == expected_action
+    if should_increment:
+        increment_revision.assert_called_once_with(
+            session,
+            organization_id=tenant.organization_id,
+            tenant_id=tenant.id,
+        )
+    else:
+        increment_revision.assert_not_called()
+
+    session.commit.assert_not_called()

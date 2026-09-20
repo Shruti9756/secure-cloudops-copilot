@@ -33,8 +33,12 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     # Limit costly AI requests without hard-coding environment-specific policy.
-    ask_rate_limit_requests: int = 10
+    ask_user_rate_limit_requests: int = 10
+    ask_organization_rate_limit_requests: int = 100
     ask_rate_limit_window_seconds: int = 60
+    # Track actual chat-model usage in a fixed local-development quota window.
+    ask_organization_token_quota_tokens: int = 50_000
+    ask_token_quota_window_seconds: int = 86_400
     # Local worker scope; production will derive this from authenticated job data.
     # None means the worker processes pending work across all tenant workspaces.
     document_processor_tenant_slug: str | None = None

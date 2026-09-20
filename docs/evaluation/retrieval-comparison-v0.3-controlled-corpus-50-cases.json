@@ -1,0 +1,156 @@
+{
+  "benchmark_suite": {
+    "path": "docs/evaluation/retrieval-eval-cases-v1.json",
+    "name": "SecureCloudOps Retrieval Evaluation Cases",
+    "version": "v1",
+    "case_count": 50,
+    "catalog_commit": "de6b9be78c18269641912736ff4a5a8b85471439"
+  },
+  "recorded_on": "2026-09-12",
+  "reranker_implementation_commit": "a5a37861044494513f0d5910100fe3c0cd303485",
+  "latency_measurement": {
+    "protocol": "One sequential local run after warming mxbai-embed-large in Ollama.",
+    "included_work": "Query embedding, database retrieval, rank fusion, and reranking when applicable.",
+    "excluded_work": "Answer generation and evaluation-metric calculation.",
+    "units": "milliseconds",
+    "scope_note": "These values describe one local development machine and are not a production load test. Repeated runs are required before making latency guarantees."
+  },
+  "configuration": {
+    "tenant": "retrieval-evaluation",
+    "corpus_scope": "Only the five versioned documents under docs/demo-data.",
+    "document_count": 5,
+    "embedded_chunk_count": 7,
+    "embedding_model": "mxbai-embed-large",
+    "semantic_metric": "pgvector cosine distance",
+    "maximum_cosine_distance": 0.4,
+    "lexical_algorithm": "custom BM25",
+    "hybrid_fusion": "reciprocal rank fusion",
+    "rrf_k": 60,
+    "hybrid_candidate_multiplier": 3,
+    "reranker": {
+      "strategy": "identifier-gated BM25 over hybrid candidates",
+      "bm25_weight": 0.01,
+      "structured_identifier_rule": "A query token must contain a digit and one of . _ : -",
+      "generic_query_behavior": "Preserve the original reciprocal-rank-fusion order."
+    }
+  },
+  "aggregate_results": [
+    {
+      "retrieval_limit": 1,
+      "strategies": {
+        "semantic": {
+          "mean_precision_at_k": 0.62,
+          "mean_recall_at_k": 0.61,
+          "total_query_input_tokens": 846,
+          "latency_ms": {
+            "mean": 765.915,
+            "p50": 349.381,
+            "p95": 2661.252
+          }
+        },
+        "lexical": {
+          "mean_precision_at_k": 0.78,
+          "mean_recall_at_k": 0.78,
+          "total_query_input_tokens": 0,
+          "latency_ms": {
+            "mean": 3.599,
+            "p50": 1.868,
+            "p95": 5.207
+          }
+        },
+        "hybrid": {
+          "mean_precision_at_k": 0.72,
+          "mean_recall_at_k": 0.71,
+          "total_query_input_tokens": 846,
+          "latency_ms": {
+            "mean": 619.213,
+            "p50": 321.045,
+            "p95": 1869.031
+          }
+        },
+        "hybrid-reranked": {
+          "mean_precision_at_k": 0.82,
+          "mean_recall_at_k": 0.81,
+          "total_query_input_tokens": 846,
+          "latency_ms": {
+            "mean": 1526.065,
+            "p50": 629.195,
+            "p95": 3649.175
+          }
+        }
+      }
+    },
+    {
+      "retrieval_limit": 3,
+      "strategies": {
+        "semantic": {
+          "mean_precision_at_k": 0.3,
+          "mean_recall_at_k": 0.88,
+          "total_query_input_tokens": 846,
+          "latency_ms": {
+            "mean": 1443.685,
+            "p50": 843.724,
+            "p95": 3659.028
+          }
+        },
+        "lexical": {
+          "mean_precision_at_k": 0.327,
+          "mean_recall_at_k": 0.96,
+          "total_query_input_tokens": 0,
+          "latency_ms": {
+            "mean": 6.063,
+            "p50": 4.435,
+            "p95": 8.281
+          }
+        },
+        "hybrid": {
+          "mean_precision_at_k": 0.333,
+          "mean_recall_at_k": 0.98,
+          "total_query_input_tokens": 846,
+          "latency_ms": {
+            "mean": 1090.124,
+            "p50": 533.928,
+            "p95": 3316.066
+          }
+        },
+        "hybrid-reranked": {
+          "mean_precision_at_k": 0.333,
+          "mean_recall_at_k": 0.98,
+          "total_query_input_tokens": 846,
+          "latency_ms": {
+            "mean": 1615.664,
+            "p50": 1385.279,
+            "p95": 4303.762
+          }
+        }
+      }
+    }
+  ],
+  "measured_improvements": {
+    "hybrid_reranked_vs_semantic_at_1": {
+      "precision_point_change": 0.2,
+      "recall_point_change": 0.2,
+      "additional_questions_with_a_relevant_first_result": 10
+    },
+    "hybrid_reranked_vs_lexical_at_1": {
+      "precision_point_change": 0.04,
+      "recall_point_change": 0.03,
+      "additional_questions_with_a_relevant_first_result": 2
+    },
+    "hybrid_reranked_vs_hybrid_at_1": {
+      "precision_point_change": 0.1,
+      "recall_point_change": 0.1,
+      "additional_questions_with_a_relevant_first_result": 5
+    }
+  },
+  "interpretation": {
+    "quality_winner": "hybrid-reranked",
+    "top_1_result": "Identifier-gated hybrid reranking returned a relevant first result for 41 of 50 questions, compared with 31 for semantic, 39 for lexical, and 36 for the original hybrid strategy.",
+    "top_3_result": "Hybrid and hybrid-reranked retrieval both reached 0.980 mean recall at three, showing that reranking improved ordering without reducing the underlying top-three candidate coverage.",
+    "latency_tradeoff": "Lexical retrieval was dramatically faster because it skipped query embedding. At the application's default limit of three, hybrid and hybrid-reranked had identical quality, while the single measured reranked run had higher mean, p50, and p95 latency.",
+    "cost_tradeoff": "Lexical retrieval used no embedding input tokens. Semantic, hybrid, and hybrid-reranked retrieval each used 846 local embedding input tokens. These are a compute-usage proxy, not a billed monetary cost, because the benchmark used local Ollama.",
+    "provisional_production_candidate": "Hybrid retrieval is the next production integration experiment because the application supplies three chunks to the answer model: hybrid improved recall at three from 0.880 to 0.980 over semantic retrieval, while reranking did not further improve the top-three set in this benchmark.",
+    "scope_note": "This controlled synthetic benchmark is stronger evidence than the earlier 12-case experiment but does not prove production performance on unseen organizations or document collections.",
+    "next_step": "Integrate hybrid retrieval behind the RAG service, preserve the API source contract, and rerun answer evaluation before accepting it as the production default."
+  }
+}
