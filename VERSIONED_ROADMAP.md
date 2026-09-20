@@ -227,7 +227,7 @@
 
 **Purpose:** Improve quality, performance, and resilience using evidence.
 
-**Status:** Feature implementation and controlled evaluation are complete. Release verification and closeout remain.
+**Status:** Released as [v0.3.0](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.3.0) on 21 September 2026.
 
 ## Reliable ingestion and Redis
 
@@ -278,12 +278,12 @@
 - [x] A retrieval improvement is backed by a reproducible 50-question measurement.
 - [x] The README and evaluation report explain quality, latency, token, and chunking tradeoffs.
 
-## Remaining release closeout
+## Completion evidence
 
-- [ ] Complete clean-clone API, web, Compose, and evaluation verification.
-- [ ] Create the V0.3 release checklist and demo script.
-- [ ] Open and merge the V0.3 pull request after required checks pass.
-- [ ] Create the annotated `v0.3.0` tag and GitHub release.
+- [x] Completed clean-clone API, web, MCP server, Docker Compose, and evaluation verification.
+- [x] Created the V0.3 release checklist, demo script, evaluation report, and synthetic screenshot evidence.
+- [x] Merged V0.3 release pull request #4 into `main` after all eight required GitHub Actions checks passed.
+- [x] Created annotated tag `v0.3.0` on merge commit `b130db7757201382aac8a269362241d0985bd4cb` and published the matching [GitHub Release](https://github.com/Shruti9756/secure-cloudops-copilot/releases/tag/v0.3.0).
 
 # V0.4 — AWS cloud platform
 
