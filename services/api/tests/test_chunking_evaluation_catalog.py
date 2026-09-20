@@ -1,6 +1,15 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from app.services.chunking_evaluation_catalog import (
+    apply_chunking_labels,
+    load_chunking_label_catalog,
+)
+from scripts.evaluate_retrieval import (
+    load_retrieval_evaluation_catalog,
+)
 from scripts.inspect_chunking_profiles import build_chunking_snapshot
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -90,3 +99,46 @@ def test_smaller_chunking_labels_reference_real_profile_chunks() -> None:
         for source_identifier in expected_sources:
             assert isinstance(source_identifier, str)
             assert source_identifier in available_source_identifiers
+
+
+def test_runtime_loader_reads_the_reviewed_label_catalog() -> None:
+    catalog = load_chunking_label_catalog(CHUNKING_LABELS_PATH)
+
+    assert catalog.base_catalog == ("docs/evaluation/retrieval-eval-cases-v1.json")
+    assert catalog.profile_name == "smaller-600-100"
+    assert catalog.max_chars == 600
+    assert catalog.overlap_chars == 100
+    assert len(catalog.case_labels) == 50
+
+
+def test_apply_chunking_labels_rewrites_tenant_and_sources() -> None:
+    _, base_cases = load_retrieval_evaluation_catalog(BASE_CATALOG_PATH)
+    label_catalog = load_chunking_label_catalog(CHUNKING_LABELS_PATH)
+
+    evaluation_cases = apply_chunking_labels(
+        base_cases,
+        label_catalog,
+        tenant_slug="temporary-smaller-profile",
+    )
+
+    assert len(evaluation_cases) == 50
+    assert all(case.tenant_slug == "temporary-smaller-profile" for case in evaluation_cases)
+    assert evaluation_cases[0].expected_source_identifiers == (
+        "deployments/checkout-2.4.0.md#chunk-1",
+        "runbooks/checkout-latency.md#chunk-1",
+    )
+
+
+def test_apply_chunking_labels_rejects_missing_cases() -> None:
+    _, base_cases = load_retrieval_evaluation_catalog(BASE_CATALOG_PATH)
+    label_catalog = load_chunking_label_catalog(CHUNKING_LABELS_PATH)
+
+    with pytest.raises(
+        ValueError,
+        match="do not match the base cases",
+    ):
+        apply_chunking_labels(
+            base_cases[:-1],
+            label_catalog,
+            tenant_slug="temporary-smaller-profile",
+        )

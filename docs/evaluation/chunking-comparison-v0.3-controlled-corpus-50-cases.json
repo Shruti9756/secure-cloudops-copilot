@@ -1,0 +1,67 @@
+{
+  "benchmark_suite": {
+    "base_catalog": "docs/evaluation/retrieval-eval-cases-v1.json",
+    "chunking_label_catalog": "docs/evaluation/chunking-eval-labels-v1.json",
+    "case_count": 50,
+    "document_count": 5
+  },
+  "methodology": {
+    "run_date": "2026-09-20",
+    "environment": "local-development",
+    "retrieval_strategy": "hybrid",
+    "retrieval_limit": 3,
+    "embedding_model": "mxbai-embed-large",
+    "isolation": "Each profile used a UUID-scoped temporary organization and workspace inside one PostgreSQL transaction. The transaction was rolled back after evaluation.",
+    "latency_scope": "Query embedding, database retrieval, and rank fusion. Document ingestion, document embedding, and metric calculation are excluded.",
+    "scope_note": "This was one local run over a synthetic controlled corpus and is not a production latency guarantee.",
+    "rollback_verification": "A database query for temporary chunk-eval workspaces returned zero rows after the comparison."
+  },
+  "profiles": [
+    {
+      "profile_name": "current-1200-200",
+      "max_chars": 1200,
+      "overlap_chars": 200,
+      "document_count": 5,
+      "chunk_count": 7,
+      "document_embedding_input_tokens": 1413,
+      "mean_precision_at_3": 0.333,
+      "mean_recall_at_3": 0.98,
+      "mean_retrieval_latency_ms": 2966.677,
+      "p50_retrieval_latency_ms": 2926.974,
+      "p95_retrieval_latency_ms": 3361.856
+    },
+    {
+      "profile_name": "smaller-600-100",
+      "max_chars": 600,
+      "overlap_chars": 100,
+      "document_count": 5,
+      "chunk_count": 12,
+      "document_embedding_input_tokens": 1511,
+      "mean_precision_at_3": 0.34,
+      "mean_recall_at_3": 0.94,
+      "mean_retrieval_latency_ms": 3068.756,
+      "p50_retrieval_latency_ms": 3004.889,
+      "p95_retrieval_latency_ms": 3847.958
+    }
+  ],
+  "smaller_minus_current": {
+    "precision_at_3_absolute": 0.007,
+    "recall_at_3_absolute": -0.04,
+    "mean_retrieval_latency_ms": 102.079,
+    "p50_retrieval_latency_ms": 77.915,
+    "p95_retrieval_latency_ms": 486.102,
+    "chunk_count": 5,
+    "document_embedding_input_tokens": 98,
+    "chunk_count_percent": 71.429,
+    "document_embedding_input_tokens_percent": 6.936,
+    "mean_retrieval_latency_percent": 3.441,
+    "p50_retrieval_latency_percent": 2.662,
+    "p95_retrieval_latency_percent": 14.459
+  },
+  "decision": {
+    "selected_profile": "current-1200-200",
+    "result": "Keep the current production chunking profile.",
+    "reason": "The smaller profile improved mean Precision@3 by only 0.007 while reducing mean Recall@3 by 0.040, creating 71.429 percent more chunks, using 6.936 percent more document-embedding input tokens, and increasing mean and tail retrieval latency.",
+    "production_change": "No chunking-default change is justified by this controlled benchmark."
+  }
+}
