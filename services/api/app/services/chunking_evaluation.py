@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 
-from app.services.chunking import TextChunk, chunk_text
+from app.services.chunking import (
+    DEFAULT_MAX_CHARS,
+    DEFAULT_OVERLAP_CHARS,
+    TextChunk,
+    chunk_text,
+)
 
 
 @dataclass(frozen=True)
@@ -8,6 +13,19 @@ class ChunkingProfile:
     name: str
     max_chars: int
     overlap_chars: int
+
+
+CURRENT_CHUNKING_PROFILE = ChunkingProfile(
+    name="current-1200-200",
+    max_chars=DEFAULT_MAX_CHARS,
+    overlap_chars=DEFAULT_OVERLAP_CHARS,
+)
+
+SMALLER_CHUNKING_PROFILE = ChunkingProfile(
+    name="smaller-600-100",
+    max_chars=600,
+    overlap_chars=100,
+)
 
 
 @dataclass(frozen=True)
