@@ -6,7 +6,39 @@ This project follows semantic versioning. The V0.x releases are learning and por
 
 ## [Unreleased]
 
-No unreleased product changes are recorded yet.
+### Reliable ingestion and Redis
+
+- Added checksum-based idempotent background document processing with persisted attempt counts, bounded exponential retry, failure reasons, and terminal failure state.
+- Added authorized document-processing retry and live browser progress.
+- Added Redis distributed document locks with ownership-safe release and lock renewal during embedding.
+- Added layered per-user and per-organization request limits and per-organization model-token quotas.
+- Added normalized-text embedding caching with provider-token accounting.
+- Added workspace knowledge revisions that invalidate cached answers after document changes.
+
+### RAG quality and evaluation
+
+- Added a versioned 50-question retrieval benchmark with reviewed expected document and chunk sources.
+- Added custom BM25 lexical retrieval, reciprocal-rank-fusion hybrid search, and an evaluation-only identifier-aware reranker.
+- Integrated hybrid retrieval into the production RAG path with semantic anchoring for safe abstention.
+- Added precision, recall, mean latency, P50 latency, P95 latency, and query-token measurements.
+- Added an eight-case grounded-answer and safe-abstention benchmark.
+- Added a controlled comparison of `1200/200` and `600/100` chunking profiles.
+- Published a consolidated V0.3 evaluation report covering quality, latency, token usage, tradeoffs, and limitations.
+- Deferred optional Ragas judge-model evaluation while retaining transparent custom metrics.
+
+### Verification
+
+- Default API suite: 459 passed, with one live end-to-end test deselected.
+- Hybrid retrieval improved mean Recall@3 from 0.880 to 0.980 on the controlled 50-question corpus.
+- Post-hybrid answer evaluation retained 1.000 outcome accuracy, citation correctness, abstention correctness, and overall pass rate.
+- The current `1200/200` chunking profile was retained based on measured recall, chunk count, embedding-token, and latency tradeoffs.
+
+### Known limitations
+
+- V0.3 measurements use a small synthetic corpus and one local-development machine.
+- Local Ollama token counts are compute proxies, not billed cloud-model costs.
+- The local database-backed worker does not yet use Amazon SQS or a dead-letter queue.
+- Ragas and broader model-judged evaluation remain optional future work.
 
 ## [0.2.0] - 2026-09-04
 

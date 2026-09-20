@@ -227,58 +227,63 @@
 
 **Purpose:** Improve quality, performance, and resilience using evidence.
 
-## Early local processing checkpoint — completed 22 August 2026
-
-> This is an early local implementation to make the V0.1 upload experience automatic. It does not complete V0.3: there is no durable job queue, Redis lock, exponential backoff, persisted failure reason, authenticated job authorization, or AWS SQS/DLQ integration yet.
-
-- [x] Added a separate local Docker Compose worker container with no exposed HTTP port.
-- [x] Reused the API image and locked dependencies while running a separate `python -m app.worker` process.
-- [x] Added tenant-scoped polling for pending documents with a configurable five-second local interval.
-- [x] Reused the tested chunking and local Ollama embedding services rather than duplicating RAG logic.
-- [x] Added an explicit SQLAlchemy transaction flush so one worker cycle can safely perform `pending → chunked → embedded` before commit.
-- [x] Kept each processing cycle transactional: an embedding failure rolls back derived chunk/vector writes and allows a later retry.
-- [x] Logged safe operational counts only—never document content, embeddings, or secrets.
-- [x] Added unit tests for tenant scoping, invalid worker configuration, and transaction boundaries: API suite at 131 passing tests.
-- [x] Verified live that an uploaded document was automatically chunked and embedded by the worker without manual processing commands.
+**Status:** Feature implementation and controlled evaluation are complete. Release verification and closeout remain.
 
 ## Reliable ingestion and Redis
 
-- [ ] Move document processing to a dedicated background-worker flow.
-- [ ] Use idempotency keys/checksums to prevent duplicate embeddings.
-- [ ] Add retry with bounded exponential backoff.
-- [ ] Add failure status, reason, and authorized retry from the UI.
-- [ ] Use Redis distributed locks to prevent duplicate processing.
-- [ ] Store short-lived job status/progress in Redis.
-- [ ] Add per-user and per-organization rate limits.
-- [ ] Add per-organization model-token/cost quotas.
-- [ ] Cache embedding results by normalized-text hash.
-- [ ] Define cache invalidation on document/version/permission changes.
+- [x] Move document processing to a dedicated local background-worker flow.
+- [x] Use checksums and normalized-text embedding-cache keys to prevent duplicate work.
+- [x] Add retry with bounded exponential backoff.
+- [x] Add failure status, persisted reason, and authorized retry from the UI.
+- [x] Use Redis distributed locks to prevent duplicate processing.
+- [x] Renew document-lock ownership during long embedding operations.
+- [x] Store short-lived job status and progress in Redis.
+- [x] Add per-user and per-organization rate limits.
+- [x] Add per-organization model-token quotas.
+- [x] Cache embedding results by normalized-text hash.
+- [x] Invalidate cached answers through workspace knowledge revisions.
 
 ## RAG quality
 
-- [ ] Build a 50–100-question synthetic evaluation dataset.
-- [ ] Track expected document/chunk sources for each test question.
-- [ ] Measure retrieval precision@k and recall@k.
-- [ ] Measure citation correctness and abstention correctness.
-- [ ] Add BM25 keyword retrieval with `rank-bm25`.
-- [ ] Combine semantic and keyword retrieval into hybrid search.
-- [ ] Add a reranker only after creating a baseline.
-- [ ] Compare chunking configurations using the evaluation set.
-- [ ] Use Ragas as an optional second evaluation framework; retain transparent custom metrics too.
-- [ ] Publish an evaluation report showing a measured improvement.
+- [x] Build a 50-question synthetic evaluation dataset.
+- [x] Track reviewed expected document and chunk sources for each test question.
+- [x] Measure retrieval Precision@k and Recall@k.
+- [x] Measure citation correctness and abstention correctness.
+- [x] Add custom BM25 keyword retrieval.
+- [x] Combine semantic and keyword retrieval using reciprocal-rank fusion.
+- [x] Evaluate a reranker after recording the semantic baseline.
+- [x] Integrate hybrid retrieval into the production RAG path.
+- [x] Rerun answer evaluation after hybrid integration.
+- [x] Compare chunking configurations using the evaluation set.
+- [ ] Use Ragas as an optional second evaluation framework. Deferred because transparent custom metrics satisfy the V0.3 release gate; a future judge-model experiment must record stochasticity and model cost separately.
+- [x] Publish an evaluation report showing measured improvement and tradeoffs.
+
+## Measured decisions
+
+- Hybrid retrieval improved mean Recall@3 from `0.880` to `0.980` over semantic retrieval on the controlled 50-question corpus.
+- Hybrid retrieval preserved `1.000` measured answer outcome, citation, abstention, and overall pass rates across eight controlled answer cases.
+- Hybrid reranking improved top-one ordering but did not improve the top-three evidence set and added measured latency, so it was not selected as the production default.
+- The current `1200/200` chunking profile was retained because `600/100` reduced Recall@3, produced more chunks, used more embedding tokens, and increased measured latency.
 
 ## Technology introduced
 
-- Background worker architecture, retry, idempotency, dead-letter reasoning
-- Advanced Redis patterns: locks, quotas, job state, cache invalidation
-- Hybrid search, BM25, reranking
-- RAG evaluation: precision, recall, groundedness, faithfulness, citation quality, Ragas
+- Transactional background-worker processing with persisted retry state.
+- Redis distributed locks, lock renewal, quotas, job progress, and cache invalidation.
+- Custom BM25 retrieval and reciprocal-rank-fusion hybrid search.
+- Deterministic evaluation for retrieval, answers, citations, abstention, chunking, latency, and token usage.
 
 ## Release gate
 
-- [ ] Ingestion is asynchronous, retryable, and idempotent.
-- [ ] At least one retrieval improvement is backed by a reproducible measurement.
-- [ ] The README/evaluation report explains quality, latency, and cost tradeoffs.
+- [x] Ingestion is asynchronous from the upload request, retryable, and idempotent.
+- [x] A retrieval improvement is backed by a reproducible 50-question measurement.
+- [x] The README and evaluation report explain quality, latency, token, and chunking tradeoffs.
+
+## Remaining release closeout
+
+- [ ] Complete clean-clone API, web, Compose, and evaluation verification.
+- [ ] Create the V0.3 release checklist and demo script.
+- [ ] Open and merge the V0.3 pull request after required checks pass.
+- [ ] Create the annotated `v0.3.0` tag and GitHub release.
 
 # V0.4 — AWS cloud platform
 
@@ -544,7 +549,7 @@ This is the authoritative inventory of every planned technology and where it wil
 | PostgreSQL | V0.1, V0.4 | [ ] |
 | pgvector | V0.1–V0.4 | [ ] |
 | Docker, Docker Compose | V0.1 | [ ] |
-| Redis: cache, rate limit, locks, job state, quotas | V0.1–V0.3 | [ ] |
+| Redis: cache, rate limit, locks, job state, quotas | V0.1–V0.3 | [x] Local baseline |
 | PDF/DOCX parsing: PyMuPDF, `python-docx` | V0.1 | [ ] |
 | Custom RAG: chunking, embeddings, retrieval, prompts, citations | V0.1 | [ ] |
 | Amazon Bedrock and `boto3` | V0.1 onward | [ ] |
@@ -553,9 +558,9 @@ This is the authoritative inventory of every planned technology and where it wil
 | Amazon Cognito, JWT | V0.2 | [x] |
 | AI safety: injection defense, output validation, PII redaction | V0.2, V0.6 | [x] V0.2 baseline; V0.6 hardening remains |
 | Bedrock Guardrails | V0.2, V0.6 | [ ] |
-| Async processing, retries, idempotency | V0.3 | [ ] |
-| Hybrid search, BM25, `rank-bm25`, reranking | V0.3 | [ ] |
-| RAG evaluation, custom metrics, Ragas | V0.3 | [ ] |
+| Async processing, retries, idempotency | V0.3 | [x] Local baseline |
+| Hybrid search, custom BM25, reranking | V0.3 | [x] Hybrid production path; reranker evaluated |
+| RAG evaluation and custom metrics | V0.3 | [x] Optional Ragas deferred |
 | Terraform | V0.4 | [ ] |
 | VPC, security groups, IAM, KMS, Secrets Manager | V0.4 | [ ] |
 | ECR, ECS Fargate, ALB | V0.4 | [ ] |
