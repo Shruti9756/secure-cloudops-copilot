@@ -125,7 +125,7 @@ These measurements are synthetic local-development evidence, not production perf
 
 ~~~powershell
 Copy-Item .env.example .env
-Copy-Item apps\web\.env.local.example apps\web\.env.local
+Copy-Item apps\web\.env.example apps\web\.env.local
 docker compose up -d --build
 docker compose exec ollama ollama pull mxbai-embed-large
 docker compose exec ollama ollama pull qwen3:4b-instruct
