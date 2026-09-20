@@ -1,0 +1,136 @@
+{
+  "benchmark_suite": {
+    "path": "docs/evaluation/answer-eval-cases-v1.json",
+    "name": "SecureCloudOps Answer Evaluation Cases",
+    "version": "v1",
+    "case_count": 8
+  },
+  "recorded_on": "2026-09-20",
+  "implementation": {
+    "hybrid_integration_commit": "d7837588952c8e50842352516fcd8dffc115bbd1",
+    "evaluated_branch_commit": "6050167aeeaa7e247678f6edef0fb05d1b4ca88f"
+  },
+  "configuration": {
+    "retrieval_strategy": "hybrid semantic and BM25 retrieval with reciprocal rank fusion",
+    "retrieval_limit": 3,
+    "hybrid_candidate_multiplier": 3,
+    "maximum_semantic_cosine_distance": 0.4,
+    "tenant": "retrieval-evaluation",
+    "embedding_model": "mxbai-embed-large",
+    "generation_model": "qwen3:4b-instruct",
+    "generation_temperature": 0,
+    "maximum_generation_tokens": 96,
+    "corpus_scope": "Only the five versioned documents in docs/demo-data.",
+    "document_count": 5,
+    "embedded_chunk_count": 7
+  },
+  "aggregate_metrics": {
+    "outcome_accuracy": 1.0,
+    "citation_correctness_rate": 1.0,
+    "abstention_correctness_rate": 1.0,
+    "overall_pass_rate": 1.0,
+    "total_query_input_tokens": 124,
+    "total_prompt_tokens": 4824,
+    "total_completion_tokens": 182
+  },
+  "case_results": [
+    {
+      "id": "ANSWER-EVAL-001",
+      "actual_status": "grounded",
+      "citation_correctness": true,
+      "abstention_correctness": null,
+      "passed": true,
+      "cited_source_identifiers": [
+        "deployments/checkout-2.4.0.md#chunk-0"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-002",
+      "actual_status": "insufficient_evidence",
+      "citation_correctness": null,
+      "abstention_correctness": true,
+      "passed": true,
+      "cited_source_identifiers": []
+    },
+    {
+      "id": "ANSWER-EVAL-003",
+      "actual_status": "grounded",
+      "citation_correctness": true,
+      "abstention_correctness": null,
+      "passed": true,
+      "cited_source_identifiers": [
+        "deployments/checkout-2.4.1.md#chunk-0"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-004",
+      "actual_status": "grounded",
+      "citation_correctness": true,
+      "abstention_correctness": null,
+      "passed": true,
+      "cited_source_identifiers": [
+        "runbooks/payments-latency.md#chunk-0"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-005",
+      "actual_status": "grounded",
+      "citation_correctness": true,
+      "abstention_correctness": null,
+      "passed": true,
+      "cited_source_identifiers": [
+        "runbooks/checkout-latency.md#chunk-1"
+      ]
+    },
+    {
+      "id": "ANSWER-EVAL-006",
+      "actual_status": "insufficient_evidence",
+      "citation_correctness": null,
+      "abstention_correctness": true,
+      "passed": true,
+      "cited_source_identifiers": []
+    },
+    {
+      "id": "ANSWER-EVAL-007",
+      "actual_status": "insufficient_evidence",
+      "citation_correctness": null,
+      "abstention_correctness": true,
+      "passed": true,
+      "cited_source_identifiers": []
+    },
+    {
+      "id": "ANSWER-EVAL-008",
+      "actual_status": "insufficient_evidence",
+      "citation_correctness": null,
+      "abstention_correctness": true,
+      "passed": true,
+      "cited_source_identifiers": []
+    }
+  ],
+  "comparison_with_semantic_baseline": {
+    "baseline_path": "docs/evaluation/answer-baseline-v0.3-controlled-corpus.json",
+    "quality_metric_deltas": {
+      "outcome_accuracy": 0.0,
+      "citation_correctness_rate": 0.0,
+      "abstention_correctness_rate": 0.0,
+      "overall_pass_rate": 0.0
+    },
+    "token_count_deltas": {
+      "total_query_input_tokens": 0,
+      "total_prompt_tokens": 546,
+      "total_completion_tokens": 14
+    }
+  },
+  "retrieval_improvement_evidence": {
+    "report_path": "docs/evaluation/retrieval-comparison-v0.3-controlled-corpus-50-cases.json",
+    "semantic_mean_recall_at_3": 0.88,
+    "hybrid_mean_recall_at_3": 0.98,
+    "absolute_recall_at_3_improvement": 0.1
+  },
+  "interpretation": {
+    "result": "Hybrid retrieval preserved perfect measured answer outcome, citation, abstention, and overall pass rates across the eight controlled answer cases.",
+    "quality_finding": "The separate 50-question retrieval benchmark improved mean Recall@3 from 0.880 to 0.980, while this answer benchmark found no regression after hybrid retrieval was integrated into the production RAG path.",
+    "token_tradeoff": "Compared with the earlier semantic-only run, this local hybrid run used 546 more prompt tokens and 14 more completion tokens. These counts are local compute-usage evidence, not billed monetary cost.",
+    "scope_note": "This is a small synthetic local-development benchmark. One successful run does not prove correctness or stable token usage for unseen organizations, document collections, or production traffic."
+  }
+}
