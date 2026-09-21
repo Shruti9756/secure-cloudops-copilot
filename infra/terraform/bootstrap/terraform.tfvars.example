@@ -1,0 +1,8 @@
+aws_profile    = "your-aws-cli-profile"
+aws_region     = "us-east-1"
+aws_account_id = "123456789012"
+
+owner       = "your-name-or-team"
+cost_center = "personal-learning"
+
+terraform_state_bucket_name = "secure-cloudops-copilot-tfstate-123456789012-us-east-1"
