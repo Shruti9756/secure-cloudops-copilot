@@ -95,10 +95,6 @@ jobs:
     name: Terraform format and validation
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: infra/terraform
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -109,12 +105,17 @@ jobs:
           terraform_version: "1.15.8"
           terraform_wrapper: false
 
-      # Download the locked provider only. This job never connects to AWS state.
-      - name: Initialize Terraform without a backend
-        run: terraform init -backend=false -input=false
+      # Download locked providers without contacting the real AWS backends.
+      - name: Initialize Terraform roots without backends
+        run: |
+          terraform -chdir=infra/terraform/bootstrap init -backend=false -input=false
+          terraform -chdir=infra/terraform/environments/development init -backend=false -input=false
 
       - name: Check Terraform formatting
-        run: terraform fmt -check
+        run: terraform -chdir=infra/terraform fmt -check -recursive
 
-      - name: Validate Terraform configuration
-        run: terraform validate -no-color
+      - name: Validate Terraform roots
+        run: |
+          terraform -chdir=infra/terraform/bootstrap validate -no-color
+          terraform -chdir=infra/terraform/environments/development validate -no-color
+          
