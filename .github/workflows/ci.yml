@@ -110,6 +110,7 @@ jobs:
         run: |
           terraform -chdir=infra/terraform/bootstrap init -backend=false -input=false
           terraform -chdir=infra/terraform/environments/development init -backend=false -input=false
+          terraform -chdir=infra/terraform/environments/staging init -backend=false -input=false
 
       - name: Check Terraform formatting
         run: terraform -chdir=infra/terraform fmt -check -recursive
@@ -118,4 +119,4 @@ jobs:
         run: |
           terraform -chdir=infra/terraform/bootstrap validate -no-color
           terraform -chdir=infra/terraform/environments/development validate -no-color
-          
+          terraform -chdir=infra/terraform/environments/staging validate -no-color

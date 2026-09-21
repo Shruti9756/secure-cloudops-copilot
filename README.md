@@ -219,6 +219,7 @@ cd ..\..
 terraform -chdir=infra\terraform fmt -check -recursive
 terraform -chdir=infra\terraform\bootstrap validate
 terraform -chdir=infra\terraform\environments\development validate
+terraform -chdir=infra\terraform\environments\staging validate
 ~~~
 
 The latest local API suite completed with **459 passed, 1 deselected**. The live Docker/Ollama end-to-end test remains opt-in because local generation performance depends on the host machine.
