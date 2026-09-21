@@ -11,6 +11,8 @@ provider "aws" {
     tags = {
       Project     = "SecureCloudOpsCopilot"
       Environment = var.environment
+      Owner       = var.owner
+      CostCenter  = var.cost_center
       ManagedBy   = "Terraform"
     }
   }
