@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     local_development_identity_role: Literal["admin", "manager", "engineer"] = "admin"
     database_url: str
     redis_url: str
+    # Exact browser origins allowed to call the API. Multiple origins are
+    # separated by commas so local .env files and ECS can supply the value.
+    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     # Limit costly AI requests without hard-coding environment-specific policy.
     ask_user_rate_limit_requests: int = 10
     ask_organization_rate_limit_requests: int = 100
@@ -65,6 +68,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def cors_allowed_origin_list(self) -> list[str]:
+        """Convert the comma-separated setting into Starlette's origin list."""
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 @lru_cache

@@ -119,12 +119,6 @@ SEMANTIC_VERSION_PATTERN = r"^\d+\.\d+\.\d+$"
 
 RUNBOOK_NAME_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
 
-# Explicit local browser origins; CORS is tightened further for production.
-DEVELOPMENT_FRONTEND_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
 
 class ServiceStatus(BaseModel):
     status: Literal["ok"]
@@ -279,7 +273,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=DEVELOPMENT_FRONTEND_ORIGINS,
+    allow_origins=get_settings().cors_allowed_origin_list,
     # Browser requests use explicit bearer tokens, never cross-site cookies.
     allow_credentials=False,
     allow_methods=["GET", "POST"],

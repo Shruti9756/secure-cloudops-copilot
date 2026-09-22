@@ -1,8 +1,25 @@
 from fastapi.testclient import TestClient
 
+from app.core.config import Settings
 from app.main import app
 
 client = TestClient(app)
+
+
+def test_cors_setting_parses_multiple_exact_origins() -> None:
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+psycopg://user:password@localhost/database",
+        redis_url="redis://localhost:6379/0",
+        cors_allowed_origins=(
+            "https://staging.secure-cloudops.example, https://admin.secure-cloudops.example"
+        ),
+    )
+
+    assert settings.cors_allowed_origin_list == [
+        "https://staging.secure-cloudops.example",
+        "https://admin.secure-cloudops.example",
+    ]
 
 
 def test_cors_allows_the_local_nextjs_origin_to_post_json() -> None:
