@@ -44,3 +44,26 @@ variable "cost_center" {
     error_message = "cost_center must not be empty."
   }
 }
+
+variable "network_vpc_cidr" {
+  description = "IPv4 CIDR assigned to this environment's VPC."
+  type        = string
+
+  validation {
+    condition     = try(cidrnetmask(var.network_vpc_cidr), "") == "255.255.0.0"
+    error_message = "The network VPC CIDR must be a valid IPv4 /16 range."
+  }
+}
+
+variable "network_availability_zones" {
+  description = "Two Availability Zones used by this environment."
+  type        = list(string)
+
+  validation {
+    condition = (
+      length(var.network_availability_zones) == 2
+      && length(distinct(var.network_availability_zones)) == 2
+    )
+    error_message = "network_availability_zones must contain exactly two distinct zones."
+  }
+}

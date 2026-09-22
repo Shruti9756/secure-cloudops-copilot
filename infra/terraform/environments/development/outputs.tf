@@ -34,3 +34,14 @@ output "cognito_managed_login_base_url" {
 
   value = "https://${aws_cognito_user_pool_domain.secure_cloudops.domain}.auth.${var.aws_region}.amazoncognito.com"
 }
+
+output "network_summary" {
+  description = "Non-sensitive IDs for the development network."
+
+  value = {
+    vpc_id             = module.network.vpc_id
+    availability_zones = module.network.availability_zones
+    public_subnet_ids  = module.network.public_subnet_ids
+    private_subnet_ids = module.network.private_subnet_ids
+  }
+}

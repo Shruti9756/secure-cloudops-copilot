@@ -61,3 +61,26 @@ variable "document_storage_bucket_name" {
   description = "Existing private S3 bucket that stores redacted extracted document text."
   type        = string
 }
+
+variable "network_vpc_cidr" {
+  description = "IPv4 CIDR assigned to this environment's VPC."
+  type        = string
+
+  validation {
+    condition     = try(cidrnetmask(var.network_vpc_cidr), "") == "255.255.0.0"
+    error_message = "The network VPC CIDR must be a valid IPv4 /16 range."
+  }
+}
+
+variable "network_availability_zones" {
+  description = "Two Availability Zones used by this environment."
+  type        = list(string)
+
+  validation {
+    condition = (
+      length(var.network_availability_zones) == 2
+      && length(distinct(var.network_availability_zones)) == 2
+    )
+    error_message = "network_availability_zones must contain exactly two distinct zones."
+  }
+}
