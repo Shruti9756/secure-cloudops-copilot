@@ -46,3 +46,8 @@ output "network_summary" {
     security_group_ids = module.security_groups.security_group_ids
   }
 }
+
+output "container_repository_urls" {
+  description = "Private ECR URLs for application images."
+  value       = module.container_registry.repository_urls
+}
