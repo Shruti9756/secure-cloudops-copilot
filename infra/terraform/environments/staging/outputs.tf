@@ -23,3 +23,14 @@ output "ecs_role_arns" {
     task      = module.ecs_roles.task_role_arns
   }
 }
+
+output "ecs_cluster_summary" {
+  description = "Staging ECS cluster and per-service log destinations."
+
+  value = {
+    cluster_arn     = module.ecs_cluster.cluster_arn
+    cluster_name    = module.ecs_cluster.cluster_name
+    log_group_names = module.ecs_cluster.log_group_names
+    log_group_arns  = module.ecs_cluster.log_group_arns
+  }
+}
