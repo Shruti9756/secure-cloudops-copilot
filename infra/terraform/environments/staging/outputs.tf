@@ -14,3 +14,12 @@ output "container_repository_urls" {
   description = "Private ECR URLs for application images."
   value       = module.container_registry.repository_urls
 }
+
+output "ecs_role_arns" {
+  description = "IAM role ARNs reserved for staging ECS services."
+
+  value = {
+    execution = module.ecs_roles.execution_role_arns
+    task      = module.ecs_roles.task_role_arns
+  }
+}
