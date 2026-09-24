@@ -1,9 +1,28 @@
 from functools import lru_cache
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import URL, Engine
 
 from app.core.config import get_settings
+
+
+def build_staging_database_url(
+    *,
+    host: str,
+    port: int,
+    database: str,
+    username: str,
+    password: str,
+) -> URL:
+    return URL.create(
+        "postgresql+psycopg",
+        username=username,
+        password=password,
+        host=host,
+        port=port,
+        database=database,
+        query={"sslmode": "require"},
+    )
 
 
 @lru_cache
