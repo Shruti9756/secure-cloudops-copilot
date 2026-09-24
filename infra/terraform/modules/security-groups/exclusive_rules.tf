@@ -18,7 +18,7 @@ resource "aws_vpc_security_group_rules_exclusive" "frontend" {
     aws_vpc_security_group_ingress_rule.frontend_from_load_balancer.id,
   ]
 
-  egress_rule_ids = []
+  egress_rule_ids = aws_vpc_security_group_egress_rule.frontend_https[*].id
 }
 
 resource "aws_vpc_security_group_rules_exclusive" "api" {
@@ -28,10 +28,13 @@ resource "aws_vpc_security_group_rules_exclusive" "api" {
     aws_vpc_security_group_ingress_rule.api_from_load_balancer.id,
   ]
 
-  egress_rule_ids = [
-    aws_vpc_security_group_egress_rule.api_to_database.id,
-    aws_vpc_security_group_egress_rule.api_to_cache.id,
-  ]
+  egress_rule_ids = concat(
+    [
+      aws_vpc_security_group_egress_rule.api_to_database.id,
+      aws_vpc_security_group_egress_rule.api_to_cache.id,
+    ],
+    aws_vpc_security_group_egress_rule.api_https[*].id,
+  )
 }
 
 resource "aws_vpc_security_group_rules_exclusive" "worker" {
@@ -39,10 +42,13 @@ resource "aws_vpc_security_group_rules_exclusive" "worker" {
 
   ingress_rule_ids = []
 
-  egress_rule_ids = [
-    aws_vpc_security_group_egress_rule.worker_to_database.id,
-    aws_vpc_security_group_egress_rule.worker_to_cache.id,
-  ]
+  egress_rule_ids = concat(
+    [
+      aws_vpc_security_group_egress_rule.worker_to_database.id,
+      aws_vpc_security_group_egress_rule.worker_to_cache.id,
+    ],
+    aws_vpc_security_group_egress_rule.worker_https[*].id,
+  )
 }
 
 resource "aws_vpc_security_group_rules_exclusive" "database" {

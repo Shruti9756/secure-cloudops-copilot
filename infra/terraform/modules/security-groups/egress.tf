@@ -57,3 +57,33 @@ resource "aws_vpc_security_group_egress_rule" "worker_to_cache" {
   to_port                      = var.cache_port
   ip_protocol                  = "tcp"
 }
+
+resource "aws_vpc_security_group_egress_rule" "frontend_https" {
+  count             = var.allow_public_https_egress ? 1 : 0
+  description       = "Allow frontend outbound HTTPS."
+  security_group_id = aws_security_group.frontend.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "api_https" {
+  count             = var.allow_public_https_egress ? 1 : 0
+  description       = "Allow API outbound HTTPS."
+  security_group_id = aws_security_group.api.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "worker_https" {
+  count             = var.allow_public_https_egress ? 1 : 0
+  description       = "Allow worker outbound HTTPS."
+  security_group_id = aws_security_group.worker.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+}

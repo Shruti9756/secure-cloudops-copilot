@@ -77,3 +77,9 @@ variable "cache_port" {
     error_message = "cache_port must be an integer from 1 through 65535."
   }
 }
+
+variable "allow_public_https_egress" {
+  description = "Allow application tasks outbound HTTPS for public-subnet staging."
+  type        = bool
+  default     = false
+}
