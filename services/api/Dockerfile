@@ -25,6 +25,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy only application source after dependencies are installed.
 COPY --chown=app:app app ./app
+COPY --chown=app:app alembic.ini ./alembic.ini
+COPY --chown=app:app migrations ./migrations
 
 USER app
 
