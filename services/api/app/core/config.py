@@ -1,8 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     local_development_identity_subject: str = "local-demo-admin"
     local_development_identity_display_name: str = "Local Demo Administrator"
     local_development_identity_role: Literal["admin", "manager", "engineer"] = "admin"
-    database_url: str
+    database_url: SecretStr | None = None
+    database_host: str | None = None
+    database_port: int = Field(default=5432, ge=1, le=65535)
+    database_name: str | None = None
+    database_username: str | None = None
+    database_password: SecretStr | None = None
     redis_url: str
     # Exact browser origins allowed to call the API. Multiple origins are
     # separated by commas so local .env files and ECS can supply the value.
@@ -67,7 +72,38 @@ class Settings(BaseSettings):
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
+
+    @model_validator(mode="after")
+    def validate_database_connection(self) -> Self:
+        split_values = (
+            self.database_host,
+            self.database_name,
+            self.database_username,
+            self.database_password,
+        )
+
+        if self.database_url is not None:
+            if not self.database_url.get_secret_value().strip() or any(
+                value is not None for value in split_values
+            ):
+                raise ValueError("Configure DATABASE_URL or complete split database settings.")
+            return self
+
+        if (
+            self.database_host is None
+            or not self.database_host.strip()
+            or self.database_name is None
+            or not self.database_name.strip()
+            or self.database_username is None
+            or not self.database_username.strip()
+            or self.database_password is None
+            or not self.database_password.get_secret_value()
+        ):
+            raise ValueError("Configure DATABASE_URL or complete split database settings.")
+
+        return self
 
     @property
     def cors_allowed_origin_list(self) -> list[str]:
