@@ -34,3 +34,8 @@ output "ecs_cluster_summary" {
     log_group_arns  = module.ecs_cluster.log_group_arns
   }
 }
+
+output "api_task_definition_arn" {
+  description = "Staging API task definition; no service or running task."
+  value       = aws_ecs_task_definition.api.arn
+}
