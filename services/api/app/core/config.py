@@ -36,7 +36,10 @@ class Settings(BaseSettings):
     database_name: str | None = None
     database_username: str | None = None
     database_password: SecretStr | None = None
-    redis_url: str
+    redis_url: SecretStr | None = None
+    redis_host: str | None = None
+    redis_port: int = Field(default=6379, ge=1, le=65535)
+    redis_password: SecretStr | None = None
     # Exact browser origins allowed to call the API. Multiple origins are
     # separated by commas so local .env files and ECS can supply the value.
     cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
@@ -102,6 +105,29 @@ class Settings(BaseSettings):
             or not self.database_password.get_secret_value()
         ):
             raise ValueError("Configure DATABASE_URL or complete split database settings.")
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_redis_connection(self) -> Self:
+        split_values_present = (
+            self.redis_host is not None
+            or self.redis_password is not None
+            or "redis_port" in self.model_fields_set
+        )
+
+        if self.redis_url is not None:
+            if not self.redis_url.get_secret_value().strip() or split_values_present:
+                raise ValueError("Configure REDIS_URL or complete split Redis settings.")
+            return self
+
+        if (
+            self.redis_host is None
+            or not self.redis_host.strip()
+            or self.redis_password is None
+            or not self.redis_password.get_secret_value()
+        ):
+            raise ValueError("Configure REDIS_URL or complete split Redis settings.")
 
         return self
 
