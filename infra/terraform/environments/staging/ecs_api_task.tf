@@ -23,6 +23,9 @@ resource "aws_ecs_task_definition" "api" {
     environment = [
       { name = "APP_ENV", value = "staging" },
       { name = "IDENTITY_PROVIDER", value = "cognito" },
+      { name = "DATABASE_HOST", value = aws_db_instance.staging.address },
+      { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging.port) },
+      { name = "DATABASE_NAME", value = aws_db_instance.staging.db_name },
     ]
     portMappings = [{
       containerPort = 8000
