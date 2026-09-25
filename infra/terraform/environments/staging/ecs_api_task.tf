@@ -28,10 +28,16 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DATABASE_NAME", value = aws_db_instance.staging.db_name },
       { name = "DATABASE_USERNAME", value = "securecloudops_app" },
     ]
-    secrets = [{
-      name      = "DATABASE_PASSWORD"
-      valueFrom = aws_secretsmanager_secret.api_database_password.arn
-    }]
+    secrets = [
+      {
+        name      = "DATABASE_PASSWORD"
+        valueFrom = aws_secretsmanager_secret.api_database_password.arn
+      },
+      {
+        name      = "REDIS_PASSWORD"
+        valueFrom = aws_secretsmanager_secret.cache_auth_token.arn
+      },
+    ]
     portMappings = [{
       containerPort = 8000
       hostPort      = 8000
