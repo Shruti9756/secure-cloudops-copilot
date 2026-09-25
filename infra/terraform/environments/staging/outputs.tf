@@ -36,6 +36,6 @@ output "ecs_cluster_summary" {
 }
 
 output "api_task_definition_arn" {
-  description = "Staging API task definition; no service or running task."
+  description = "Staging API task definition; the API service starts with zero running tasks."
   value       = aws_ecs_task_definition.api.arn
 }
