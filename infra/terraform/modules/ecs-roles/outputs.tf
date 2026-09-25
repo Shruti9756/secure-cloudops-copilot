@@ -13,3 +13,11 @@ output "task_role_arns" {
     service => role.arn
   }
 }
+
+output "execution_role_names" {
+  description = "Execution role name for each ECS service."
+  value = {
+    for service, role in aws_iam_role.execution :
+    service => role.name
+  }
+}

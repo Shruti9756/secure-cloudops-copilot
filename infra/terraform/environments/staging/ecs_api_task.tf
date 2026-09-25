@@ -26,7 +26,12 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DATABASE_HOST", value = aws_db_instance.staging.address },
       { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging.port) },
       { name = "DATABASE_NAME", value = aws_db_instance.staging.db_name },
+      { name = "DATABASE_USERNAME", value = "securecloudops_app" },
     ]
+    secrets = [{
+      name      = "DATABASE_PASSWORD"
+      valueFrom = aws_secretsmanager_secret.api_database_password.arn
+    }]
     portMappings = [{
       containerPort = 8000
       hostPort      = 8000
