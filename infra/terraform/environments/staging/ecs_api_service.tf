@@ -1,7 +1,8 @@
 resource "aws_ecs_service" "api" {
+  count           = var.runtime_enabled ? 1 : 0
   name            = "secure-cloudops-${var.environment}-api"
   cluster         = module.ecs_cluster.cluster_arn
-  task_definition = aws_ecs_task_definition.api.arn
+  task_definition = aws_ecs_task_definition.api[0].arn
   launch_type     = "FARGATE"
 
   # Define the service without starting a container yet.

@@ -3,6 +3,7 @@ locals {
 }
 
 resource "aws_ecs_task_definition" "api" {
+  count                    = var.runtime_enabled ? 1 : 0
   family                   = "secure-cloudops-${var.environment}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
@@ -23,12 +24,12 @@ resource "aws_ecs_task_definition" "api" {
     environment = [
       { name = "APP_ENV", value = "staging" },
       { name = "IDENTITY_PROVIDER", value = "cognito" },
-      { name = "DATABASE_HOST", value = aws_db_instance.staging.address },
-      { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging.port) },
-      { name = "DATABASE_NAME", value = aws_db_instance.staging.db_name },
+      { name = "DATABASE_HOST", value = aws_db_instance.staging[0].address },
+      { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging[0].port) },
+      { name = "DATABASE_NAME", value = aws_db_instance.staging[0].db_name },
       { name = "DATABASE_USERNAME", value = "securecloudops_app" },
-      { name = "REDIS_HOST", value = one(data.aws_elasticache_cluster.staging_node.cache_nodes).address },
-      { name = "REDIS_PORT", value = tostring(one(data.aws_elasticache_cluster.staging_node.cache_nodes).port) },
+      { name = "REDIS_HOST", value = one(data.aws_elasticache_cluster.staging_node[0].cache_nodes).address },
+      { name = "REDIS_PORT", value = tostring(one(data.aws_elasticache_cluster.staging_node[0].cache_nodes).port) },
     ]
     secrets = [
       {

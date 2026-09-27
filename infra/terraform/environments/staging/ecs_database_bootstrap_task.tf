@@ -1,5 +1,5 @@
 locals {
-  bootstrap_master_secret_arn = one(aws_db_instance.staging.master_user_secret).secret_arn
+  bootstrap_master_secret_arn = var.runtime_enabled ? one(aws_db_instance.staging[0].master_user_secret).secret_arn : null
 }
 
 data "aws_iam_policy_document" "database_bootstrap_trust" {
@@ -38,6 +38,7 @@ resource "aws_iam_role_policy_attachment" "database_bootstrap_execution" {
 }
 
 data "aws_iam_policy_document" "database_bootstrap_secrets" {
+  count = var.runtime_enabled ? 1 : 0
   statement {
     sid     = "ReadBootstrapDatabasePasswords"
     actions = ["secretsmanager:GetSecretValue"]
@@ -49,9 +50,10 @@ data "aws_iam_policy_document" "database_bootstrap_secrets" {
 }
 
 resource "aws_iam_role_policy" "database_bootstrap_secrets" {
+  count  = var.runtime_enabled ? 1 : 0
   name   = "secure-cloudops-${var.environment}-db-bootstrap-secrets"
   role   = aws_iam_role.database_bootstrap_execution.name
-  policy = data.aws_iam_policy_document.database_bootstrap_secrets.json
+  policy = data.aws_iam_policy_document.database_bootstrap_secrets[0].json
 }
 
 resource "aws_cloudwatch_log_group" "database_bootstrap" {
@@ -60,6 +62,7 @@ resource "aws_cloudwatch_log_group" "database_bootstrap" {
 }
 
 resource "aws_ecs_task_definition" "database_bootstrap" {
+  count                    = var.runtime_enabled ? 1 : 0
   family                   = "secure-cloudops-${var.environment}-database-bootstrap"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
@@ -80,10 +83,10 @@ resource "aws_ecs_task_definition" "database_bootstrap" {
 
     environment = [
       { name = "APP_ENV", value = "staging" },
-      { name = "DATABASE_HOST", value = aws_db_instance.staging.address },
-      { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging.port) },
-      { name = "DATABASE_NAME", value = aws_db_instance.staging.db_name },
-      { name = "DATABASE_ADMIN_USERNAME", value = aws_db_instance.staging.username },
+      { name = "DATABASE_HOST", value = aws_db_instance.staging[0].address },
+      { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging[0].port) },
+      { name = "DATABASE_NAME", value = aws_db_instance.staging[0].db_name },
+      { name = "DATABASE_ADMIN_USERNAME", value = aws_db_instance.staging[0].username },
       { name = "DATABASE_APP_USERNAME", value = "securecloudops_app" },
     ]
 

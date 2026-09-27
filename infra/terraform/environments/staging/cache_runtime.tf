@@ -17,6 +17,7 @@ ephemeral "aws_secretsmanager_secret_version" "cache_auth" {
 }
 
 resource "aws_elasticache_replication_group" "staging" {
+  count                      = var.runtime_enabled ? 1 : 0
   replication_group_id       = "secure-cloudops-${var.environment}-cache"
   description                = "Private single-node staging cache"
   engine                     = "valkey"
@@ -44,5 +45,6 @@ resource "aws_elasticache_replication_group" "staging" {
 }
 
 data "aws_elasticache_cluster" "staging_node" {
-  cluster_id = one(aws_elasticache_replication_group.staging.member_clusters)
+  count      = var.runtime_enabled ? 1 : 0
+  cluster_id = one(aws_elasticache_replication_group.staging[0].member_clusters)
 }

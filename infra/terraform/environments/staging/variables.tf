@@ -67,3 +67,9 @@ variable "network_availability_zones" {
     error_message = "network_availability_zones must contain exactly two distinct zones."
   }
 }
+
+variable "runtime_enabled" {
+  description = "Create disposable staging RDS, Valkey, and dependent ECS resources for a planned cloud test."
+  type        = bool
+  default     = false
+}

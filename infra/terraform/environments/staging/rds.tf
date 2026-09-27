@@ -8,6 +8,7 @@ resource "aws_db_subnet_group" "staging" {
 }
 
 resource "aws_db_instance" "staging" {
+  count      = var.runtime_enabled ? 1 : 0
   identifier = "secure-cloudops-${var.environment}-db"
 
   engine         = "postgres"
@@ -28,9 +29,9 @@ resource "aws_db_instance" "staging" {
   multi_az               = false
 
   backup_retention_period      = 1
-  deletion_protection          = true
-  skip_final_snapshot          = false
-  final_snapshot_identifier    = "secure-cloudops-${var.environment}-db-final"
+  deletion_protection          = false
+  skip_final_snapshot          = true
+  delete_automated_backups     = true
   performance_insights_enabled = false
   monitoring_interval          = 0
 
