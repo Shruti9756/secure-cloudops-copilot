@@ -39,3 +39,8 @@ output "api_task_definition_arn" {
   description = "Staging API task definition; the API service starts with zero running tasks."
   value       = aws_ecs_task_definition.api.arn
 }
+
+output "database_bootstrap_task_definition_arn" {
+  description = "One-off staging database bootstrap task definition; Terraform does not run it."
+  value       = aws_ecs_task_definition.database_bootstrap.arn
+}

@@ -1,5 +1,5 @@
 locals {
-  staging_api_image_tag = "86bea64f8215b64bd3cbcc787b98c7ac82225f5e"
+  staging_api_image_tag = "50ae30a0e4aa8ae1e1fa1c419c4f49d7fd21e382"
 }
 
 resource "aws_ecs_task_definition" "api" {
