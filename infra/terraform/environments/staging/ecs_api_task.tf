@@ -27,6 +27,8 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging.port) },
       { name = "DATABASE_NAME", value = aws_db_instance.staging.db_name },
       { name = "DATABASE_USERNAME", value = "securecloudops_app" },
+      { name = "REDIS_HOST", value = one(data.aws_elasticache_cluster.staging_node.cache_nodes).address },
+      { name = "REDIS_PORT", value = tostring(one(data.aws_elasticache_cluster.staging_node.cache_nodes).port) },
     ]
     secrets = [
       {

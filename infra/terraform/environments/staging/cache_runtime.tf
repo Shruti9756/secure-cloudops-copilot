@@ -42,3 +42,7 @@ resource "aws_elasticache_replication_group" "staging" {
     Name = "secure-cloudops-${var.environment}-cache"
   }
 }
+
+data "aws_elasticache_cluster" "staging_node" {
+  cluster_id = one(aws_elasticache_replication_group.staging.member_clusters)
+}
