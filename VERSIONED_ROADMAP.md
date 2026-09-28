@@ -287,7 +287,7 @@
 
 # V0.4 — AWS cloud platform
 
-**Purpose:** Deploy the proven system as containers on AWS using infrastructure as code. Start with a cost-conscious staging setup; do not keep all services running continuously while learning.
+**Purpose:** Deploy the proven system on AWS using infrastructure as code. Start with a cost-conscious staging setup; do not keep all services running continuously while learning.
 
 ## Infrastructure as code
 
@@ -303,8 +303,9 @@
 - [ ] Understand the cost/security tradeoff of NAT gateways; avoid them until required.
 - [ ] Create ECR repositories for Docker images.
 - [ ] Build and push immutable SHA-tagged images.
-- [ ] Deploy frontend/API/worker containers to Amazon ECS Fargate.
-- [ ] Use an Application Load Balancer and HTTPS for public application traffic.
+- [ ] Host the exported frontend in a private Amazon S3 bucket behind CloudFront.
+- [ ] Deploy the API and worker containers to Amazon ECS Fargate.
+- [ ] Use CloudFront HTTPS for the frontend; design the API's HTTPS entry point and Application Load Balancer separately.
 - [ ] Move PostgreSQL to Amazon RDS with backups, encryption, and private access.
 - [ ] Move Redis to Amazon ElastiCache when the workload needs distributed cloud caching.
 - [ ] Use S3 as the source-document store with encryption, versioning, lifecycle rules, and least-privilege policies.
@@ -333,7 +334,7 @@
 
 - Terraform
 - AWS VPC, IAM, KMS, Secrets Manager
-- ECR, ECS Fargate, Application Load Balancer
+- ECR, ECS Fargate, Application Load Balancer, CloudFront
 - RDS PostgreSQL, ElastiCache, S3, SQS/DLQ
 - CloudWatch, X-Ray
 - GitHub Actions OIDC
