@@ -44,13 +44,3 @@ output "database_bootstrap_task_definition_arn" {
   description = "One-off staging database bootstrap task definition; Terraform does not run it."
   value       = try(aws_ecs_task_definition.database_bootstrap[0].arn, null)
 }
-
-output "frontend_hosting" {
-  description = "Private bucket and AWS-provided HTTPS address for the staging frontend."
-
-  value = {
-    bucket_name     = aws_s3_bucket.frontend.id
-    distribution_id = aws_cloudfront_distribution.frontend.id
-    https_url       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
-  }
-}
