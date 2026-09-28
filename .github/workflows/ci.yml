@@ -75,6 +75,14 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Build static frontend export
+        env:
+          WEB_OUTPUT_MODE: export
+        run: |
+          npm run build
+          test -f out/index.html
+          test -f out/auth/callback.html
+
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
