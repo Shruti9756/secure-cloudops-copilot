@@ -73,3 +73,15 @@ variable "runtime_enabled" {
   type        = bool
   default     = false
 }
+
+variable "staging_cognito_issuer" {
+  description = "Issuer URL of the dedicated staging Cognito user pool."
+  type        = string
+  default     = ""
+}
+
+variable "staging_cognito_app_client_id" {
+  description = "Public web app client ID in the dedicated staging Cognito user pool."
+  type        = string
+  default     = ""
+}

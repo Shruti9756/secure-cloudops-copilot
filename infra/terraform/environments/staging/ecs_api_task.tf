@@ -24,6 +24,8 @@ resource "aws_ecs_task_definition" "api" {
     environment = [
       { name = "APP_ENV", value = "staging" },
       { name = "IDENTITY_PROVIDER", value = "cognito" },
+      { name = "COGNITO_ISSUER", value = var.staging_cognito_issuer },
+      { name = "COGNITO_APP_CLIENT_ID", value = var.staging_cognito_app_client_id },
       { name = "DATABASE_HOST", value = aws_db_instance.staging[0].address },
       { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging[0].port) },
       { name = "DATABASE_NAME", value = aws_db_instance.staging[0].db_name },
@@ -59,5 +61,15 @@ resource "aws_ecs_task_definition" "api" {
 
   tags = {
     Name = "secure-cloudops-${var.environment}-api"
+  }
+  lifecycle {
+    precondition {
+      condition = (
+        startswith(var.staging_cognito_issuer, "https://cognito-idp.${var.aws_region}.amazonaws.com/")
+        && length(var.staging_cognito_issuer) > length("https://cognito-idp.${var.aws_region}.amazonaws.com/")
+        && length(trimspace(var.staging_cognito_app_client_id)) > 0
+      )
+      error_message = "Set the staging Cognito issuer and app client ID before enabling the runtime."
+    }
   }
 }
