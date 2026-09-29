@@ -79,13 +79,22 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         question=question,
         limit=2,
     )
+    bedrock_cache_key = build_ask_response_cache_key(
+        tenant_slug="nimbuscart",
+        knowledge_revision=7,
+        document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
+        question=question,
+        limit=2,
+        embedding_provider="bedrock",
+    )
 
     assert cache_key == equivalent_cache_key
     assert cache_key != other_tenant_cache_key
     assert cache_key != privileged_cache_key
     assert cache_key != new_revision_cache_key
+    assert cache_key != bedrock_cache_key
     assert question not in cache_key
-    assert "securecloudops:ask:v4:nimbuscart:7:" in cache_key
+    assert "securecloudops:ask:v5:nimbuscart:7:" in cache_key
 
 
 def test_load_cached_response_returns_valid_json_payload() -> None:

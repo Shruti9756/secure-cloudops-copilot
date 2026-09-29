@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, Mock, call
 from uuid import uuid4
 
@@ -6,6 +7,10 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.db.models import KnowledgeDocument
+from app.infrastructure.bedrock import (
+    TITAN_TEXT_EMBEDDINGS_V2_DIMENSIONS,
+    TITAN_TEXT_EMBEDDINGS_V2_MODEL_ID,
+)
 from app.infrastructure.ollama import (
     OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
     OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
@@ -61,6 +66,10 @@ def test_build_worker_embedding_provider_wraps_ollama_with_redis_cache(
     cached_provider = Mock()
     create_ollama_provider = Mock(return_value=ollama_provider)
     create_cached_provider = Mock(return_value=cached_provider)
+    monkeypatch.setattr(
+        "app.worker.get_settings",
+        lambda: SimpleNamespace(embedding_provider="ollama"),
+    )
 
     monkeypatch.setattr(
         "app.worker.OllamaEmbeddingClient",
@@ -82,6 +91,46 @@ def test_build_worker_embedding_provider_wraps_ollama_with_redis_cache(
         cache=redis_client,
         model_id=OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
         dimensions=OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
+    )
+
+
+def test_build_worker_embedding_provider_wraps_bedrock_with_redis_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis_client = Mock()
+    bedrock_provider = Mock()
+    cached_provider = Mock()
+    create_bedrock_provider = Mock(return_value=bedrock_provider)
+    create_ollama_provider = Mock()
+    create_cached_provider = Mock(return_value=cached_provider)
+
+    monkeypatch.setattr(
+        "app.worker.get_settings",
+        lambda: SimpleNamespace(embedding_provider="bedrock"),
+    )
+    monkeypatch.setattr(
+        "app.worker.BedrockEmbeddingClient",
+        create_bedrock_provider,
+    )
+    monkeypatch.setattr(
+        "app.worker.OllamaEmbeddingClient",
+        create_ollama_provider,
+    )
+    monkeypatch.setattr(
+        "app.worker.CachedEmbeddingProvider",
+        create_cached_provider,
+    )
+
+    result = build_worker_embedding_provider(redis_client=redis_client)
+
+    assert result is cached_provider
+    create_bedrock_provider.assert_called_once_with()
+    create_ollama_provider.assert_not_called()
+    create_cached_provider.assert_called_once_with(
+        provider=bedrock_provider,
+        cache=redis_client,
+        model_id=TITAN_TEXT_EMBEDDINGS_V2_MODEL_ID,
+        dimensions=TITAN_TEXT_EMBEDDINGS_V2_DIMENSIONS,
     )
 
 

@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import get_settings
 from app.db.models import KnowledgeDocument, Tenant
 from app.db.session import get_session_factory
+from app.infrastructure.bedrock import (
+    TITAN_TEXT_EMBEDDINGS_V2_DIMENSIONS,
+    TITAN_TEXT_EMBEDDINGS_V2_MODEL_ID,
+    BedrockEmbeddingClient,
+)
 from app.infrastructure.ollama import (
     OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
     OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
@@ -59,12 +64,21 @@ def build_worker_embedding_provider(
     *,
     redis_client: EmbeddingCacheClient,
 ) -> EmbeddingProvider:
-    """Build the worker embedding provider with validated Redis caching."""
+    """Build the selected embedding provider with validated Redis caching."""
+    if get_settings().embedding_provider == "bedrock":
+        provider: EmbeddingProvider = BedrockEmbeddingClient()
+        model_id = TITAN_TEXT_EMBEDDINGS_V2_MODEL_ID
+        dimensions = TITAN_TEXT_EMBEDDINGS_V2_DIMENSIONS
+    else:
+        provider = OllamaEmbeddingClient()
+        model_id = OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID
+        dimensions = OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS
+
     return CachedEmbeddingProvider(
-        provider=OllamaEmbeddingClient(),
+        provider=provider,
         cache=redis_client,
-        model_id=OLLAMA_MXBAI_EMBED_LARGE_MODEL_ID,
-        dimensions=OLLAMA_MXBAI_EMBED_LARGE_DIMENSIONS,
+        model_id=model_id,
+        dimensions=dimensions,
     )
 
 

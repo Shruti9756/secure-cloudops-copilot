@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import KnowledgeDocument, Membership, Tenant
 from app.db.session import get_session_factory
+from app.infrastructure.bedrock import BedrockEmbeddingClient
 from app.infrastructure.cognito import (
     COGNITO_AUTHENTICATION_FAILURE_MESSAGE,
     COGNITO_IDENTITY_PROVIDER_UNAVAILABLE_MESSAGE,
@@ -69,6 +70,7 @@ from app.services.document_storage import (
     get_redacted_document_store,
     redacted_document_reference_from_metadata,
 )
+from app.services.embeddings import EmbeddingProvider
 from app.services.ingestion import ingest_document
 from app.services.local_identity import (
     LocalDevelopmentIdentityUnavailableError,
@@ -529,8 +531,10 @@ def get_authorized_document_write_tenant(
         ) from error
 
 
-def get_embedding_provider() -> OllamaEmbeddingClient:
-    """Provide the local embedding client; tests can override this dependency."""
+def get_embedding_provider() -> EmbeddingProvider:
+    """Select the configured embedding client; Ollama remains the default."""
+    if get_settings().embedding_provider == "bedrock":
+        return BedrockEmbeddingClient()
     return OllamaEmbeddingClient()
 
 
@@ -1431,7 +1435,7 @@ def ask_question(
     ],
     cache: Annotated[Redis, Depends(get_redis_cache)],
     embedding_provider: Annotated[
-        OllamaEmbeddingClient,
+        EmbeddingProvider,
         Depends(get_embedding_provider),
     ],
     chat_provider: Annotated[
@@ -1568,6 +1572,7 @@ def ask_question(
         document_access_levels=readable_document_access_levels,
         question=request.question,
         limit=request.limit,
+        embedding_provider=settings.embedding_provider,
     )
     cache_lookup = load_cached_response(cache, cache_key=cache_key)
 

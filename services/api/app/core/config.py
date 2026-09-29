@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     )
     # Local Python uses loopback; Docker Compose overrides this with the ollama service name.
     ollama_base_url: str = "http://127.0.0.1:11434"
+    embedding_provider: Literal["ollama", "bedrock"] = "ollama"
     # Local development uses an AWS CLI profile; AWS deployments will use an IAM role.
     aws_profile: str | None = None
     aws_region: str = "us-east-1"

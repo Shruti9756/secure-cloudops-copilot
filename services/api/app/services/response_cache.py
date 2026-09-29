@@ -9,7 +9,7 @@ from typing import Protocol
 from redis.exceptions import RedisError
 
 # Bump this version when the answer pipeline changes in a cache-incompatible way.
-ASK_RESPONSE_CACHE_KEY_VERSION = "v4"
+ASK_RESPONSE_CACHE_KEY_VERSION = "v5"
 
 # Short TTL bounds how long unreachable entries from older revisions remain in Redis.
 ASK_RESPONSE_CACHE_TTL_SECONDS = 300
@@ -45,6 +45,7 @@ def build_ask_response_cache_key(
     document_access_levels: Collection[str],
     question: str,
     limit: int,
+    embedding_provider: str = "ollama",
 ) -> str:
     """Build a tenant-safe cache key without exposing the raw user question."""
     normalized_question = normalize_question(question)
@@ -60,7 +61,8 @@ def build_ask_response_cache_key(
 
     return (
         f"securecloudops:ask:{ASK_RESPONSE_CACHE_KEY_VERSION}:"
-        f"{tenant_slug}:{knowledge_revision}:{access_scope_digest}:{limit}:{question_digest}"
+        f"{tenant_slug}:{knowledge_revision}:{embedding_provider}:"
+        f"{access_scope_digest}:{limit}:{question_digest}"
     )
 
 
