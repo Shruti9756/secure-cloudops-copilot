@@ -20,6 +20,19 @@ Before a full browser-to-answer test, review these dependencies in order:
 
 This checklist is a design gate, not an instruction to apply Terraform or start services. A partial AWS apply does not satisfy a step merely because some supporting resources exist; verify the actual outputs and a fresh plan first.
 
+### Local preflight findings
+
+These findings describe the current repository configuration, not the status of an AWS deployment. Resolve and verify each one before a full browser-to-answer staging test:
+
+| Gate | Current configuration | What must be verified |
+| --- | --- | --- |
+| Staging sign-in | `infra/terraform/environments/staging/variables.tf` leaves the staging Cognito issuer and app client ID blank. The API task refuses an on-mode plan without them. | A dedicated staging user pool and client use the real staging HTTPS callback/logout URLs; the API and browser use matching values. Do not reuse the development pool. |
+| Browser-to-API connection | There is no staging API HTTPS entry point yet. The API's default `CORS_ALLOWED_ORIGINS` contains only localhost, and `ecs_api_task.tf` does not override it. | The browser has an actual HTTPS API URL, and the API allows the exact staging website origin. A public task IP is not a substitute for the reviewed entry point. |
+| Embedding and answers | The API and worker task definitions do not select an embedding provider, so both default to Ollama at `127.0.0.1`. The API chat provider also uses Ollama. No staging Ollama service is defined. | The API and worker use the same reachable embedding model, answer generation uses a reachable chat model, and any required model permissions are confirmed before starting tasks. |
+| Controlled runtime | Both ECS services are defined with `desired_count = 0`; Terraform enabling the runtime registers tasks but starts neither service. | Database bootstrap succeeds first; deliberate API/worker start, observation, stop, and runtime-off steps are reviewed for one short test session. |
+
+Do not change these to development URLs or placeholder identifiers merely to make a plan pass. Model access and the browser path remain separate checks even after Terraform validation succeeds.
+
 ## Before any Terraform apply
 
 From `C:\Users\Shru\Documents\AI+AWS`:
