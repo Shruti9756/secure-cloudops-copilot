@@ -6,6 +6,20 @@ The persistent network, ECR repositories, ECS cluster, and two application secre
 
 The static website is managed separately by `infra/terraform/environments/staging-frontend`, with its own Terraform state at `states/staging/frontend.tfstate`. The website's private S3 bucket and CloudFront distribution are **not** controlled by `runtime_enabled`; switching the platform runtime off does not remove them. Run website plans from the `staging-frontend` root, never from this platform root when the intention is to change only the website.
 
+## Readiness gate for a full staging test
+
+Keep `runtime_enabled=false` until there is a specific test session and a reviewed way to start, observe, and stop every billable runtime component. A Terraform task definition is only a container recipe; both the API and worker services have `desired_count = 0`, so enabling the runtime alone will not start either container.
+
+Before a full browser-to-answer test, review these dependencies in order:
+
+1. **Website:** Confirm that the separate frontend state contains a successfully created CloudFront distribution and its private-bucket read policy. Build the static export with staging browser settings, publish it, and confirm its HTTPS URL and `auth/callback.html` route. A bucket and origin access control alone do not make the website available.
+2. **API entry:** Provide a reviewed HTTPS entry point for the API. The API security group allows requests from the load-balancer security group, but this configuration does not yet create an Application Load Balancer or a public API URL. Do not rely on the task's public IP as the browser entry point.
+3. **Identity and browser configuration:** Use a dedicated staging Cognito pool and app client, not the development identifiers. Match its callback/logout URLs, the frontend's build-time `NEXT_PUBLIC_*` values, and the API's allowed browser origin to the actual staging HTTPS addresses.
+4. **AI and ingestion:** Select cloud-usable embedding and chat providers for the API and worker, confirm required model authorization, and make both sides use the same embedding model. The worker task and service are defined but start at zero tasks; review how to start and stop the worker before testing uploads.
+5. **Controlled session:** Review database bootstrap, API and worker start/stop, a smoke test, and the runtime-off plan. Confirm that all staging data is disposable, because switching the runtime off deletes the database and cache.
+
+This checklist is a design gate, not an instruction to apply Terraform or start services. A partial AWS apply does not satisfy a step merely because some supporting resources exist; verify the actual outputs and a fresh plan first.
+
 ## Before any Terraform apply
 
 From `C:\Users\Shru\Documents\AI+AWS`:
@@ -27,7 +41,7 @@ This creates supporting resources **without** creating the RDS instance or Valke
 terraform -chdir=infra\terraform\environments\staging plan -input=false -var="runtime_enabled=false"
 ```
 
-For the current code and state, expect **11 adds, 0 changes, 0 destroys**. The additions include two Secrets Manager secrets, which can have ongoing cost. Read the resource names, not just the count.
+The last reviewed off-mode plan showed **11 adds, 0 changes, 0 destroys**. The count can change after an apply or code update, so read the resource names rather than treating 11 as a target. The additions include two Secrets Manager secrets, which can have ongoing cost.
 
 Only after deciding to create those resources, run:
 
@@ -38,7 +52,8 @@ terraform -chdir=infra\terraform\environments\staging apply -var="runtime_enable
 Terraform will show a **fresh plan** and ask for approval. Check it again before typing `yes`. If it differs from what you expected, type `no` and stop.
 
 ## Start a planned test session
-**Hold for now:** Do not run this section until the separate database-bootstrap, API-start, and session-shutdown steps are documented and reviewed. Turning the runtime on creates RDS and Valkey while the API remains stopped.
+
+**Hold for now:** Do not run this section until staging Cognito is configured and the separate database-bootstrap, API/worker-start, and session-shutdown steps are documented and reviewed. Turning the runtime on creates RDS and Valkey while the API and worker remain stopped.
 
 First review:
 
@@ -46,7 +61,7 @@ First review:
 terraform -chdir=infra\terraform\environments\staging plan -input=false -var="runtime_enabled=true"
 ```
 
-After the supporting setup is applied, the current design should add six runtime resources, including the RDS instance and Valkey replication group, with no destroys. RDS and Valkey can incur charges while they exist.
+Until the staging Cognito issuer and app client ID are configured, an on-mode plan must fail the API task's safety check. A `Plan: ...` line alongside that error is not a successful plan. Do not insert development or placeholder values to make it pass. After a real staging pool and client are configured, review a complete plan by resource name rather than relying on a fixed count. It should include RDS, Valkey, the API and worker task definitions and services, and their required policies, with no unexpected destroys. RDS and Valkey can incur charges while they exist.
 
 Only when ready for a cloud test, run:
 
@@ -56,7 +71,7 @@ terraform -chdir=infra\terraform\environments\staging apply -var="runtime_enable
 
 Review the fresh plan before typing `yes`. Record when the database and cache are created.
 
-**This does not start the application.** The API service has `desired_count = 0`. Running the one-off database bootstrap task and then starting the API require separate reviewed instructions; do not improvise those steps.
+**This does not start the application.** The API and worker services have `desired_count = 0`. Running the one-off database bootstrap task and then starting the API and worker require separate reviewed instructions; do not improvise those steps.
 
 ## Database bootstrap — future test session
 
@@ -168,7 +183,7 @@ Review the removal:
 terraform -chdir=infra\terraform\environments\staging plan -input=false -var="runtime_enabled=false"
 ```
 
-With the current design, expect removal of the RDS instance, Valkey replication group, API service, API task definition, database-bootstrap task definition, and bootstrap secret-read policy. Stop if Terraform also proposes deleting the network, ECR repositories, ECS cluster, or the two persistent application secrets.
+With the current design, expect removal of the RDS instance, Valkey replication group, API and worker services and task definitions, database-bootstrap task definition, and the bootstrap and worker secret-read policies. Stop if Terraform also proposes deleting the network, ECR repositories, ECS cluster, or the two persistent application secrets.
 
 Only after reviewing and accepting that data loss, run:
 
