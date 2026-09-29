@@ -4,6 +4,8 @@ This procedure is for the **staging** Terraform environment and **synthetic data
 
 The persistent network, ECR repositories, ECS cluster, and two application secrets remain when the runtime is off. Therefore, off does not mean zero AWS cost.
 
+The static website is managed separately by `infra/terraform/environments/staging-frontend`, with its own Terraform state at `states/staging/frontend.tfstate`. The website's private S3 bucket and CloudFront distribution are **not** controlled by `runtime_enabled`; switching the platform runtime off does not remove them. Run website plans from the `staging-frontend` root, never from this platform root when the intention is to change only the website.
+
 ## Before any Terraform apply
 
 From `C:\Users\Shru\Documents\AI+AWS`:
