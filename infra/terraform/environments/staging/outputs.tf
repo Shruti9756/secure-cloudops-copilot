@@ -44,3 +44,8 @@ output "database_bootstrap_task_definition_arn" {
   description = "One-off staging database bootstrap task definition; Terraform does not run it."
   value       = try(aws_ecs_task_definition.database_bootstrap[0].arn, null)
 }
+
+output "worker_task_definition_arn" {
+  description = "Staging worker task definition; the worker service starts with zero running tasks."
+  value       = try(aws_ecs_task_definition.worker[0].arn, null)
+}
