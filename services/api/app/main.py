@@ -51,6 +51,7 @@ from app.services.authorization import (
     Permission,
     authorize_tenant_action,
 )
+from app.services.chat import ChatProvider
 from app.services.cognito_identity import (
     CognitoUserNotProvisionedError,
     get_cognito_principal,
@@ -538,7 +539,7 @@ def get_embedding_provider() -> EmbeddingProvider:
     return OllamaEmbeddingClient()
 
 
-def get_chat_provider() -> OllamaChatClient:
+def get_chat_provider() -> ChatProvider:
     """Provide the local chat client; tests can override this dependency."""
     return OllamaChatClient()
 
@@ -1439,7 +1440,7 @@ def ask_question(
         Depends(get_embedding_provider),
     ],
     chat_provider: Annotated[
-        OllamaChatClient,
+        ChatProvider,
         Depends(get_chat_provider),
     ],
 ) -> AskResponse:
