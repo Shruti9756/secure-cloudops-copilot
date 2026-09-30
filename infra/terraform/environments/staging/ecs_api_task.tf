@@ -26,6 +26,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "IDENTITY_PROVIDER", value = "cognito" },
       { name = "COGNITO_ISSUER", value = var.staging_cognito_issuer },
       { name = "COGNITO_APP_CLIENT_ID", value = var.staging_cognito_app_client_id },
+      { name = "CORS_ALLOWED_ORIGINS", value = var.staging_frontend_origin },
       { name = "DATABASE_HOST", value = aws_db_instance.staging[0].address },
       { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging[0].port) },
       { name = "DATABASE_NAME", value = aws_db_instance.staging[0].db_name },
@@ -70,6 +71,10 @@ resource "aws_ecs_task_definition" "api" {
         && length(trimspace(var.staging_cognito_app_client_id)) > 0
       )
       error_message = "Set the staging Cognito issuer and app client ID before enabling the runtime."
+    }
+    precondition {
+      condition     = var.staging_frontend_origin != ""
+      error_message = "Set staging_frontend_origin to the verified staging HTTPS website origin before enabling the runtime."
     }
   }
 }

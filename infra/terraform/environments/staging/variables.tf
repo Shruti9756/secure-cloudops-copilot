@@ -85,3 +85,18 @@ variable "staging_cognito_app_client_id" {
   type        = string
   default     = ""
 }
+
+variable "staging_frontend_origin" {
+  description = "Exact HTTPS origin of the staging website, with no path or trailing slash."
+  type        = string
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition = (
+      var.staging_frontend_origin == ""
+      || can(regex("^https://[A-Za-z0-9.-]+$", var.staging_frontend_origin))
+    )
+    error_message = "Use a single HTTPS website origin without a path or trailing slash."
+  }
+}

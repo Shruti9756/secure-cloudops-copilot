@@ -11,3 +11,5 @@ network_availability_zones = ["us-east-1a", "us-east-1b"]
 # Leave blank while staging runtime is off. Do not use development Cognito values.
 staging_cognito_issuer        = ""
 staging_cognito_app_client_id = ""
+# Leave blank until the real staging CloudFront HTTPS address exists.
+staging_frontend_origin = ""
