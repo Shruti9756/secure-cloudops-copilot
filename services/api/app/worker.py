@@ -263,6 +263,27 @@ def claim_document_for_message(
     return session.scalar(statement)
 
 
+def is_queued_document_terminal(
+    *,
+    session: Session,
+    message: DocumentProcessingMessage,
+) -> bool:
+    """Check whether this exact document is already finished."""
+    statement = (
+        select(KnowledgeDocument.ingestion_status)
+        .join(KnowledgeDocument.tenant)
+        .where(
+            KnowledgeDocument.id == message.document_id,
+            KnowledgeDocument.tenant_id == message.tenant_id,
+            KnowledgeDocument.organization_id == message.organization_id,
+            Tenant.organization_id == message.organization_id,
+        )
+        # If an upload or manual retry is changing this row, defer the message.
+        .with_for_update(of=KnowledgeDocument, skip_locked=True)
+    )
+    return session.scalar(statement) in {"embedded", "failed"}
+
+
 def process_document(
     *,
     session: Session,
@@ -514,11 +535,17 @@ def process_one_queue_delivery(
         message=delivery.message,
     )
 
-    # process_next_document returns a non-None result only after the database
-    # transaction commits. This includes committed retry/failure bookkeeping.
-    if result is not None:
-        receiver.ack(delivery)
+    if result is None:
+        with session_factory() as session:
+            if not is_queued_document_terminal(
+                session=session,
+                message=delivery.message,
+            ):
+                return None
 
+    # Either processing committed, or a fresh scoped read found a finished
+    # duplicate. Never acknowledge merely because processing returned None.
+    receiver.ack(delivery)
     return result
 
 

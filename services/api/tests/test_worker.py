@@ -29,6 +29,7 @@ from app.worker import (
     build_worker_embedding_provider,
     claim_document_for_message,
     claim_next_document,
+    is_queued_document_terminal,
     list_tenant_slugs_requiring_processing,
     process_all_tenant_documents,
     process_document,
@@ -1343,3 +1344,109 @@ def test_queue_cycle_surfaces_acknowledgment_failure(
         )
 
     receiver.ack.assert_called_once_with(receiver.receive_one.return_value)
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("embedded", True),
+        ("failed", True),
+        ("pending", False),
+        ("chunked", False),
+        (None, False),
+    ],
+)
+def test_queued_terminal_lookup_checks_exact_scope_and_current_status(
+    status: str | None,
+    expected: bool,
+) -> None:
+    message = make_queue_delivery().message
+    session = Mock()
+    session.scalar.return_value = status
+
+    result = is_queued_document_terminal(session=session, message=message)
+
+    assert result is expected
+    statement = session.scalar.call_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    statement_sql = str(compiled)
+
+    assert "knowledge_documents.id =" in statement_sql
+    assert "knowledge_documents.tenant_id =" in statement_sql
+    assert "knowledge_documents.organization_id =" in statement_sql
+    assert "tenants.organization_id =" in statement_sql
+    assert "FOR UPDATE OF knowledge_documents SKIP LOCKED" in statement_sql
+    assert message.document_id in compiled.params.values()
+    assert message.tenant_id in compiled.params.values()
+    assert message.organization_id in compiled.params.values()
+
+
+@pytest.mark.parametrize(
+    ("status", "ack_expected"),
+    [
+        ("embedded", True),
+        ("failed", True),
+        ("pending", False),
+        ("chunked", False),
+        (None, False),
+    ],
+)
+def test_queue_cycle_acknowledges_only_a_finished_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str | None,
+    ack_expected: bool,
+) -> None:
+    delivery = make_queue_delivery()
+    receiver = Mock()
+    receiver.receive_one.return_value = delivery
+
+    session = Mock()
+    session.scalar.return_value = status
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__.return_value = session
+
+    monkeypatch.setattr(
+        "app.worker.process_next_document",
+        Mock(return_value=None),
+    )
+
+    result = process_one_queue_delivery(
+        session_factory=session_factory,
+        provider=Mock(),
+        redis_client=Mock(),
+        receiver=receiver,
+    )
+
+    assert result is None
+    session.scalar.assert_called_once()
+    if ack_expected:
+        receiver.ack.assert_called_once_with(delivery)
+    else:
+        receiver.ack.assert_not_called()
+
+
+def test_queue_cycle_does_not_acknowledge_when_terminal_lookup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receiver = Mock()
+    receiver.receive_one.return_value = make_queue_delivery()
+
+    session = Mock()
+    session.scalar.side_effect = RuntimeError("database status unavailable")
+    session_factory = MagicMock()
+    session_factory.return_value.__enter__.return_value = session
+
+    monkeypatch.setattr(
+        "app.worker.process_next_document",
+        Mock(return_value=None),
+    )
+
+    with pytest.raises(RuntimeError, match="database status unavailable"):
+        process_one_queue_delivery(
+            session_factory=session_factory,
+            provider=Mock(),
+            redis_client=Mock(),
+            receiver=receiver,
+        )
+
+    receiver.ack.assert_not_called()
