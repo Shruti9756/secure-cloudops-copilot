@@ -17,11 +17,13 @@ from app.infrastructure.ollama import (
 )
 from app.services.chunking import ChunkingResult
 from app.services.document_lock import DocumentLockLease
+from app.services.document_queue import DocumentProcessingMessage
 from app.services.embedding_persistence import DocumentEmbeddingResult
 from app.worker import (
     EMPTY_PROCESSING_CYCLE_RESULT,
     ProcessingCycleResult,
     build_worker_embedding_provider,
+    claim_document_for_message,
     claim_next_document,
     list_tenant_slugs_requiring_processing,
     process_all_tenant_documents,
@@ -375,6 +377,67 @@ def test_claim_next_document_uses_a_due_row_lock() -> None:
     assert "FOR UPDATE OF knowledge_documents SKIP LOCKED" in statement_sql
     assert "nimbuscart" in compiled_statement.params.values()
     assert AVAILABLE_AT in compiled_statement.params.values()
+
+
+def test_claim_document_for_message_scopes_and_locks_due_row() -> None:
+    session = Mock()
+    document = make_document()
+    message = DocumentProcessingMessage(
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+        document_id=document.id,
+    )
+    session.scalar.return_value = document
+
+    claimed_document = claim_document_for_message(
+        session=session,
+        message=message,
+        available_at=AVAILABLE_AT,
+    )
+
+    statement = session.scalar.call_args.args[0]
+    compiled_statement = statement.compile(dialect=postgresql.dialect())
+    statement_sql = str(compiled_statement)
+
+    assert claimed_document is document
+    for required_sql in (
+        "JOIN tenants",
+        "knowledge_documents.id =",
+        "knowledge_documents.tenant_id =",
+        "knowledge_documents.organization_id =",
+        "tenants.organization_id =",
+        "knowledge_documents.ingestion_status",
+        "knowledge_documents.processing_attempt_count",
+        "knowledge_documents.next_processing_attempt_at IS NULL",
+        "knowledge_documents.next_processing_attempt_at <=",
+        "FOR UPDATE OF knowledge_documents SKIP LOCKED",
+    ):
+        assert required_sql in statement_sql
+
+    assert message.document_id in compiled_statement.params.values()
+    assert message.tenant_id in compiled_statement.params.values()
+    assert message.organization_id in compiled_statement.params.values()
+    assert AVAILABLE_AT in compiled_statement.params.values()
+
+
+def test_claim_document_for_message_returns_none_when_no_row_matches() -> None:
+    session = Mock()
+    session.scalar.return_value = None
+    document = make_document()
+    message = DocumentProcessingMessage(
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+        document_id=document.id,
+    )
+
+    result = claim_document_for_message(
+        session=session,
+        message=message,
+        available_at=AVAILABLE_AT,
+    )
+
+    assert result is None
+    session.scalar.assert_called_once()
 
 
 def test_process_next_document_skips_a_row_locked_by_another_worker(

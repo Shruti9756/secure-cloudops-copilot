@@ -38,6 +38,7 @@ from app.services.document_lock import (
     release_document_lock,
     renew_document_lock,
 )
+from app.services.document_queue import DocumentProcessingMessage
 from app.services.document_retry import (
     DEFAULT_PROCESSING_MAX_ATTEMPTS,
     PROCESSABLE_DOCUMENT_STATUSES,
@@ -232,6 +233,33 @@ def claim_next_document(
         .with_for_update(of=KnowledgeDocument, skip_locked=True)
     )
 
+    return session.scalar(statement)
+
+
+def claim_document_for_message(
+    *,
+    session: Session,
+    message: DocumentProcessingMessage,
+    available_at: datetime,
+) -> KnowledgeDocument | None:
+    """Lock one due document matching all IDs in a queue message."""
+    statement = (
+        select(KnowledgeDocument)
+        .join(KnowledgeDocument.tenant)
+        .where(
+            KnowledgeDocument.id == message.document_id,
+            KnowledgeDocument.tenant_id == message.tenant_id,
+            KnowledgeDocument.organization_id == message.organization_id,
+            Tenant.organization_id == message.organization_id,
+            KnowledgeDocument.ingestion_status.in_(PROCESSABLE_DOCUMENT_STATUSES),
+            KnowledgeDocument.processing_attempt_count < DEFAULT_PROCESSING_MAX_ATTEMPTS,
+            or_(
+                KnowledgeDocument.next_processing_attempt_at.is_(None),
+                KnowledgeDocument.next_processing_attempt_at <= available_at,
+            ),
+        )
+        .with_for_update(of=KnowledgeDocument, skip_locked=True)
+    )
     return session.scalar(statement)
 
 
