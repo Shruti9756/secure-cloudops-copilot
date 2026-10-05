@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Mapping
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -11,6 +12,7 @@ from app.services.document_queue import (
     DocumentProcessingMessage,
     DocumentQueueUnavailableError,
     SqsDocumentQueue,
+    SqsDocumentReceiver,
 )
 
 ORGANIZATION_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -119,4 +121,114 @@ def test_sender_hides_aws_failure_details() -> None:
         match="Document queue is unavailable",
     ) as error:
         queue.enqueue(MESSAGE)
+    assert "private account detail" not in str(error.value)
+
+
+def test_receiver_returns_one_delivery_without_auto_acknowledging() -> None:
+    client = Mock()
+    client.receive_message.return_value = {
+        "Messages": [
+            {"Body": MESSAGE.to_json(), "ReceiptHandle": "receipt-1"},
+        ]
+    }
+    receiver = SqsDocumentReceiver(
+        queue_url=" https://sqs.example.test/queue ",
+        client=client,
+    )
+
+    client.receive_message.assert_not_called()
+    delivery = receiver.receive_one()
+
+    assert delivery is not None
+    assert delivery.message == MESSAGE
+    assert delivery.receipt_handle == "receipt-1"
+    client.receive_message.assert_called_once_with(
+        QueueUrl="https://sqs.example.test/queue",
+        MaxNumberOfMessages=1,
+        WaitTimeSeconds=10,
+    )
+    client.delete_message.assert_not_called()
+
+    # This verifies the transport method only. The live worker must not call
+    # ack until its processing-outcome rules are implemented.
+    receiver.ack(delivery)
+    client.delete_message.assert_called_once_with(
+        QueueUrl="https://sqs.example.test/queue",
+        ReceiptHandle="receipt-1",
+    )
+
+
+@pytest.mark.parametrize("response", [{}, {"Messages": []}])
+def test_receiver_returns_none_when_queue_is_empty(
+    response: Mapping[str, object],
+) -> None:
+    client = Mock()
+    client.receive_message.return_value = response
+    receiver = SqsDocumentReceiver(queue_url="test-queue", client=client)
+
+    assert receiver.receive_one() is None
+    client.delete_message.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("response", "error_type"),
+    [
+        ({"Messages": "invalid"}, TypeError),
+        ({"Messages": [{}]}, TypeError),
+        (
+            {"Messages": [{"Body": MESSAGE.to_json(), "ReceiptHandle": ""}]},
+            ValueError,
+        ),
+        (
+            {"Messages": [{"Body": "not-json", "ReceiptHandle": "receipt-1"}]},
+            ValueError,
+        ),
+        ({"Messages": [{}, {}]}, ValueError),
+    ],
+)
+def test_receiver_rejects_bad_messages_without_acknowledging(
+    response: Mapping[str, object],
+    error_type: type[Exception],
+) -> None:
+    client = Mock()
+    client.receive_message.return_value = response
+    receiver = SqsDocumentReceiver(queue_url="test-queue", client=client)
+
+    with pytest.raises(error_type):
+        receiver.receive_one()
+    client.delete_message.assert_not_called()
+
+
+def test_receiver_hides_aws_receive_failure_details() -> None:
+    client = Mock()
+    client.receive_message.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "private account detail"}},
+        "ReceiveMessage",
+    )
+    receiver = SqsDocumentReceiver(queue_url="test-queue", client=client)
+
+    with pytest.raises(DocumentQueueUnavailableError) as error:
+        receiver.receive_one()
+
+    assert "private account detail" not in str(error.value)
+    client.delete_message.assert_not_called()
+
+
+def test_receiver_hides_aws_delete_failure_details() -> None:
+    client = Mock()
+    client.receive_message.return_value = {
+        "Messages": [{"Body": MESSAGE.to_json(), "ReceiptHandle": "receipt-1"}]
+    }
+    receiver = SqsDocumentReceiver(queue_url="test-queue", client=client)
+    delivery = receiver.receive_one()
+    assert delivery is not None
+
+    client.delete_message.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "private account detail"}},
+        "DeleteMessage",
+    )
+
+    with pytest.raises(DocumentQueueUnavailableError) as error:
+        receiver.ack(delivery)
+
     assert "private account detail" not in str(error.value)

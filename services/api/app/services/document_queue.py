@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Protocol, Self
 from uuid import UUID
 
@@ -110,3 +110,89 @@ class SqsDocumentQueue:
         if not isinstance(message_id, str) or not message_id.strip():
             raise DocumentQueueUnavailableError("Document queue did not acknowledge the message")
         return message_id
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentQueueDelivery:
+    message: DocumentProcessingMessage
+    receipt_handle: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.receipt_handle, str):
+            raise TypeError("SQS receipt handle must be a string")
+        if not self.receipt_handle.strip():
+            raise ValueError("SQS receipt handle must not be empty")
+
+
+class SqsReceiverClient(Protocol):
+    def receive_message(
+        self,
+        *,
+        QueueUrl: str,
+        MaxNumberOfMessages: int,
+        WaitTimeSeconds: int,
+    ) -> Mapping[str, object]: ...
+
+    def delete_message(
+        self,
+        *,
+        QueueUrl: str,
+        ReceiptHandle: str,
+    ) -> Mapping[str, object]: ...
+
+
+class SqsDocumentReceiver:
+    """Receive one queue hint without deciding whether processing succeeded."""
+
+    def __init__(self, *, queue_url: str, client: SqsReceiverClient) -> None:
+        if not queue_url.strip():
+            raise ValueError("SQS queue URL must not be empty")
+        self._queue_url = queue_url.strip()
+        self._client = client
+
+    def receive_one(self) -> DocumentQueueDelivery | None:
+        try:
+            response = self._client.receive_message(
+                QueueUrl=self._queue_url,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=10,
+            )
+        except BotoCoreError, ClientError:
+            raise DocumentQueueUnavailableError("Document queue is unavailable") from None
+
+        if not isinstance(response, Mapping):
+            raise TypeError("SQS response must be a mapping")
+
+        messages = response.get("Messages", [])
+        if not isinstance(messages, list):
+            raise TypeError("SQS messages must be a list")
+        if len(messages) > 1:
+            raise ValueError("SQS returned more than one message")
+        if not messages:
+            return None
+
+        received = messages[0]
+        if not isinstance(received, Mapping):
+            raise TypeError("SQS message must be a mapping")
+
+        body = received.get("Body")
+        receipt_handle = received.get("ReceiptHandle")
+        if not isinstance(body, str) or not isinstance(receipt_handle, str):
+            raise TypeError("SQS message body and receipt handle must be strings")
+
+        return DocumentQueueDelivery(
+            message=DocumentProcessingMessage.from_json(body),
+            receipt_handle=receipt_handle,
+        )
+
+    def ack(self, delivery: DocumentQueueDelivery) -> None:
+        """Delete a delivery only when a future caller explicitly decides it is safe."""
+        if not isinstance(delivery, DocumentQueueDelivery):
+            raise TypeError("A received document delivery is required")
+        try:
+            self._client.delete_message(
+                QueueUrl=self._queue_url,
+                ReceiptHandle=delivery.receipt_handle,
+            )
+        except BotoCoreError, ClientError:
+            raise DocumentQueueUnavailableError("Document queue is unavailable") from None
