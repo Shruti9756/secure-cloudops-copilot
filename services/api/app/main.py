@@ -37,7 +37,10 @@ from app.infrastructure.cognito import (
     CognitoJwksUnavailableError,
 )
 from app.infrastructure.ollama import OllamaEmbeddingClient
-from app.infrastructure.ollama_chat import OllamaChatClient
+from app.infrastructure.ollama_chat import (
+    OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
+    OllamaChatClient,
+)
 from app.infrastructure.postgres import postgres_is_available
 from app.infrastructure.redis import get_redis_client, redis_is_available
 from app.infrastructure.s3 import S3DocumentStorageUnavailableError
@@ -1573,6 +1576,8 @@ def ask_question(
         document_access_levels=readable_document_access_levels,
         question=request.question,
         limit=request.limit,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
         embedding_provider=settings.embedding_provider,
     )
     cache_lookup = load_cached_response(cache, cache_key=cache_key)

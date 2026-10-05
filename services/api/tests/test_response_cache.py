@@ -2,6 +2,7 @@ import json
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from app.infrastructure.ollama_chat import OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID
 from app.services.document_access import (
     ALL_DOCUMENT_ACCESS_LEVELS,
     DEFAULT_DOCUMENT_ACCESS_LEVELS,
@@ -50,6 +51,8 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
     equivalent_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
@@ -57,6 +60,8 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question="why did checkout latency increase?",
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
     other_tenant_cache_key = build_ask_response_cache_key(
         tenant_slug="other-tenant",
@@ -64,6 +69,8 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
     privileged_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
@@ -71,6 +78,8 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
     new_revision_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
@@ -78,6 +87,8 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
     bedrock_cache_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
@@ -85,6 +96,8 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
         document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
         embedding_provider="bedrock",
     )
 
@@ -94,7 +107,30 @@ def test_cache_key_is_tenant_revision_and_access_scoped() -> None:
     assert cache_key != new_revision_cache_key
     assert cache_key != bedrock_cache_key
     assert question not in cache_key
-    assert "securecloudops:ask:v5:nimbuscart:7:" in cache_key
+    assert "securecloudops:ask:v6:nimbuscart:7:" in cache_key
+
+
+def test_cache_key_separates_chat_providers_and_models() -> None:
+    def key_for(chat_provider: str, chat_model_id: str) -> str:
+        return build_ask_response_cache_key(
+            tenant_slug="nimbuscart",
+            knowledge_revision=7,
+            document_access_levels=DEFAULT_DOCUMENT_ACCESS_LEVELS,
+            question="Why did checkout latency increase?",
+            limit=2,
+            chat_provider=chat_provider,
+            chat_model_id=chat_model_id,
+        )
+
+    ollama_key = key_for("ollama", OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID)
+    bedrock_model_a_key = key_for("bedrock", "test-model-a")
+    bedrock_model_b_key = key_for("bedrock", "test-model-b")
+    ollama_model_a_key = key_for("ollama", "test-model-a")
+
+    assert ollama_key != bedrock_model_a_key
+    assert bedrock_model_a_key != bedrock_model_b_key
+    assert ollama_model_a_key != bedrock_model_a_key
+    assert "test-model-a" not in bedrock_model_a_key
 
 
 def test_load_cached_response_returns_valid_json_payload() -> None:

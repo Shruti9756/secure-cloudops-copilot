@@ -9,7 +9,7 @@ from typing import Protocol
 from redis.exceptions import RedisError
 
 # Bump this version when the answer pipeline changes in a cache-incompatible way.
-ASK_RESPONSE_CACHE_KEY_VERSION = "v5"
+ASK_RESPONSE_CACHE_KEY_VERSION = "v6"
 
 # Short TTL bounds how long unreachable entries from older revisions remain in Redis.
 ASK_RESPONSE_CACHE_TTL_SECONDS = 300
@@ -45,24 +45,33 @@ def build_ask_response_cache_key(
     document_access_levels: Collection[str],
     question: str,
     limit: int,
+    chat_provider: str,
+    chat_model_id: str,
     embedding_provider: str = "ollama",
 ) -> str:
-    """Build a tenant-safe cache key without exposing the raw user question."""
+    """Build a tenant-safe cache key without exposing the raw question or model ID."""
     normalized_question = normalize_question(question)
     normalized_document_access_levels = tuple(sorted(set(document_access_levels)))
+    normalized_chat_provider = chat_provider.strip()
+    normalized_chat_model_id = chat_model_id.strip()
 
     if not normalized_document_access_levels:
         raise ValueError("At least one document access level is required")
+    if not normalized_chat_provider or not normalized_chat_model_id:
+        raise ValueError("Chat provider and model ID are required")
 
     access_scope_digest = hashlib.sha256(
         "\x1f".join(normalized_document_access_levels).encode("utf-8")
     ).hexdigest()
     question_digest = hashlib.sha256(normalized_question.encode("utf-8")).hexdigest()
+    chat_identity_digest = hashlib.sha256(
+        f"{normalized_chat_provider}\x1f{normalized_chat_model_id}".encode()
+    ).hexdigest()
 
     return (
         f"securecloudops:ask:{ASK_RESPONSE_CACHE_KEY_VERSION}:"
         f"{tenant_slug}:{knowledge_revision}:{embedding_provider}:"
-        f"{access_scope_digest}:{limit}:{question_digest}"
+        f"{chat_identity_digest}:{access_scope_digest}:{limit}:{question_digest}"
     )
 
 

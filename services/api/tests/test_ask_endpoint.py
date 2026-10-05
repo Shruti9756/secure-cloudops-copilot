@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.db.models import Tenant
+from app.infrastructure.ollama_chat import OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID
 from app.main import (
     app,
     get_authorized_knowledge_access,
@@ -511,6 +512,8 @@ def test_ask_endpoint_reuses_a_grounded_response_from_redis_cache(
         document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
 
     assert first_response.status_code == 200
@@ -567,6 +570,8 @@ def test_ask_endpoint_misses_cache_after_knowledge_revision_changes(
         document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
     revision_four_key = build_ask_response_cache_key(
         tenant_slug="nimbuscart",
@@ -574,6 +579,8 @@ def test_ask_endpoint_misses_cache_after_knowledge_revision_changes(
         document_access_levels=ALL_DOCUMENT_ACCESS_LEVELS,
         question=question,
         limit=2,
+        chat_provider="ollama",
+        chat_model_id=OLLAMA_QWEN3_4B_INSTRUCT_MODEL_ID,
     )
 
     assert first_response.status_code == 200
