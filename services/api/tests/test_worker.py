@@ -440,6 +440,158 @@ def test_claim_document_for_message_returns_none_when_no_row_matches() -> None:
     session.scalar.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("tenant_slug", "include_message"),
+    [
+        ("nimbuscart", True),
+        (None, False),
+    ],
+)
+def test_process_next_document_rejects_ambiguous_selectors_before_database_work(
+    tenant_slug: str | None,
+    include_message: bool,
+) -> None:
+    session_factory = MagicMock()
+    document = make_document()
+    message = (
+        DocumentProcessingMessage(
+            organization_id=document.organization_id,
+            tenant_id=document.tenant_id,
+            document_id=document.id,
+        )
+        if include_message
+        else None
+    )
+
+    with pytest.raises(ValueError, match="exactly one"):
+        process_next_document(
+            session_factory=session_factory,
+            tenant_slug=tenant_slug,
+            message=message,
+            provider=Mock(),
+            redis_client=Mock(),
+            available_at=AVAILABLE_AT,
+        )
+
+    session_factory.begin.assert_not_called()
+
+
+def test_process_next_document_does_not_poll_when_queued_document_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    session_factory = MagicMock()
+    session_factory.begin.return_value.__enter__.return_value = session
+    document = make_document()
+    message = DocumentProcessingMessage(
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+        document_id=document.id,
+    )
+
+    queued_claim = Mock(return_value=None)
+    polling_claim = Mock()
+    acquire_lock = Mock()
+    process_document_mock = Mock()
+    monkeypatch.setattr("app.worker.claim_document_for_message", queued_claim)
+    monkeypatch.setattr("app.worker.claim_next_document", polling_claim)
+    monkeypatch.setattr("app.worker.acquire_document_lock", acquire_lock)
+    monkeypatch.setattr("app.worker.process_document", process_document_mock)
+
+    result = process_next_document(
+        session_factory=session_factory,
+        message=message,
+        provider=Mock(),
+        redis_client=Mock(),
+        available_at=AVAILABLE_AT,
+    )
+
+    assert result is None
+    queued_claim.assert_called_once_with(
+        session=session,
+        message=message,
+        available_at=AVAILABLE_AT,
+    )
+    polling_claim.assert_not_called()
+    acquire_lock.assert_not_called()
+    process_document_mock.assert_not_called()
+    session.begin_nested.assert_not_called()
+
+
+def test_process_next_document_uses_existing_processing_path_for_queue_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = MagicMock()
+    session_factory = MagicMock()
+    session_factory.begin.return_value.__enter__.return_value = session
+    provider = Mock()
+    redis_client = Mock()
+    redis_client.eval.return_value = 1
+    document = make_document()
+    message = DocumentProcessingMessage(
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+        document_id=document.id,
+    )
+    lease = DocumentLockLease(
+        key="document-lock",
+        owner_token="worker-token",
+        ttl_seconds=120,
+    )
+    result_value = ProcessingCycleResult(
+        chunked_documents=1,
+        chunks_created=1,
+        embedded_documents=1,
+        embedded_chunks=1,
+        skipped_chunks=0,
+        input_tokens=10,
+    )
+
+    queued_claim = Mock(return_value=document)
+    polling_claim = Mock()
+    acquire_lock = Mock(return_value=lease)
+    release_lock = Mock(return_value=True)
+    process_document_mock = Mock(return_value=result_value)
+    store_status = Mock(return_value=True)
+
+    monkeypatch.setattr("app.worker.claim_document_for_message", queued_claim)
+    monkeypatch.setattr("app.worker.claim_next_document", polling_claim)
+    monkeypatch.setattr("app.worker.acquire_document_lock", acquire_lock)
+    monkeypatch.setattr("app.worker.release_document_lock", release_lock)
+    monkeypatch.setattr("app.worker.process_document", process_document_mock)
+    monkeypatch.setattr("app.worker.store_document_job_status", store_status)
+
+    result = process_next_document(
+        session_factory=session_factory,
+        message=message,
+        provider=provider,
+        redis_client=redis_client,
+        available_at=AVAILABLE_AT,
+    )
+
+    assert result == result_value
+    queued_claim.assert_called_once_with(
+        session=session,
+        message=message,
+        available_at=AVAILABLE_AT,
+    )
+    polling_claim.assert_not_called()
+    acquire_lock.assert_called_once_with(redis_client, document_id=document.id)
+    session.begin_nested.assert_called_once_with()
+    process_document_mock.assert_called_once_with(
+        session=session,
+        document=document,
+        provider=provider,
+        lock_heartbeat=ANY,
+        job_progress=ANY,
+    )
+    release_lock.assert_called_once_with(redis_client, lease)
+    assert [item.kwargs["stage"] for item in store_status.call_args_list] == [
+        "claimed",
+        "completed",
+    ]
+
+
 def test_process_next_document_skips_a_row_locked_by_another_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

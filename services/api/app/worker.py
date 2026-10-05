@@ -334,24 +334,40 @@ def process_document(
 def process_next_document(
     *,
     session_factory: sessionmaker[Session],
-    tenant_slug: str,
+    tenant_slug: str | None = None,
     provider: EmbeddingProvider,
     redis_client: DocumentWorkerRedisClient,
     available_at: datetime,
+    message: DocumentProcessingMessage | None = None,
 ) -> ProcessingCycleResult | None:
-    """Claim and process one due document with PostgreSQL and Redis locks."""
-    normalized_tenant_slug = _normalize_tenant_slug(tenant_slug)
+    """Process one due document selected by workspace polling or a queue message."""
+    if message is None:
+        if tenant_slug is None:
+            raise ValueError("Provide exactly one of tenant_slug or message")
+        normalized_tenant_slug = _normalize_tenant_slug(tenant_slug)
+    else:
+        if tenant_slug is not None:
+            raise ValueError("Provide exactly one of tenant_slug or message")
+        # This UUID is a safe label for the existing worker log messages.
+        normalized_tenant_slug = str(message.tenant_id)
     result: ProcessingCycleResult | None = None
     final_stage: DocumentJobStage | None = None
     final_status_document: KnowledgeDocument | None = None
     lock_ownership_intact = True
 
     with session_factory.begin() as session:
-        document = claim_next_document(
-            session=session,
-            tenant_slug=normalized_tenant_slug,
-            available_at=available_at,
-        )
+        if message is None:
+            document = claim_next_document(
+                session=session,
+                tenant_slug=normalized_tenant_slug,
+                available_at=available_at,
+            )
+        else:
+            document = claim_document_for_message(
+                session=session,
+                message=message,
+                available_at=available_at,
+            )
 
         if document is None:
             return None
