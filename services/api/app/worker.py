@@ -38,7 +38,7 @@ from app.services.document_lock import (
     release_document_lock,
     renew_document_lock,
 )
-from app.services.document_queue import DocumentProcessingMessage
+from app.services.document_queue import DocumentProcessingMessage, SqsDocumentReceiver
 from app.services.document_retry import (
     DEFAULT_PROCESSING_MAX_ATTEMPTS,
     PROCESSABLE_DOCUMENT_STATUSES,
@@ -490,6 +490,34 @@ def process_next_document(
             document=final_status_document,
             stage=final_stage,
         )
+
+    return result
+
+
+def process_one_queue_delivery(
+    *,
+    session_factory: sessionmaker[Session],
+    provider: EmbeddingProvider,
+    redis_client: DocumentWorkerRedisClient,
+    receiver: SqsDocumentReceiver,
+) -> ProcessingCycleResult | None:
+    """Process one SQS hint; database polling remains responsible for due retries."""
+    delivery = receiver.receive_one()
+    if delivery is None:
+        return None
+
+    result = process_next_document(
+        session_factory=session_factory,
+        provider=provider,
+        redis_client=redis_client,
+        available_at=_utc_now(),
+        message=delivery.message,
+    )
+
+    # process_next_document returns a non-None result only after the database
+    # transaction commits. This includes committed retry/failure bookkeeping.
+    if result is not None:
+        receiver.ack(delivery)
 
     return result
 

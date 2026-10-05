@@ -17,7 +17,11 @@ from app.infrastructure.ollama import (
 )
 from app.services.chunking import ChunkingResult
 from app.services.document_lock import DocumentLockLease
-from app.services.document_queue import DocumentProcessingMessage
+from app.services.document_queue import (
+    DocumentProcessingMessage,
+    DocumentQueueDelivery,
+    DocumentQueueUnavailableError,
+)
 from app.services.embedding_persistence import DocumentEmbeddingResult
 from app.worker import (
     EMPTY_PROCESSING_CYCLE_RESULT,
@@ -30,6 +34,7 @@ from app.worker import (
     process_document,
     process_next_document,
     process_one_cycle,
+    process_one_queue_delivery,
 )
 
 AVAILABLE_AT = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
@@ -1205,3 +1210,136 @@ def test_process_all_tenant_documents_continues_after_one_tenant_failure(
             ),
         ]
     )
+
+
+def make_queue_delivery() -> DocumentQueueDelivery:
+    document = make_document()
+    message = DocumentProcessingMessage(
+        organization_id=document.organization_id,
+        tenant_id=document.tenant_id,
+        document_id=document.id,
+    )
+    return DocumentQueueDelivery(message=message, receipt_handle="receipt-1")
+
+
+def test_queue_cycle_does_nothing_when_queue_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receiver = Mock()
+    receiver.receive_one.return_value = None
+    process_next = Mock()
+    monkeypatch.setattr("app.worker.process_next_document", process_next)
+
+    result = process_one_queue_delivery(
+        session_factory=MagicMock(),
+        provider=Mock(),
+        redis_client=Mock(),
+        receiver=receiver,
+    )
+
+    assert result is None
+    process_next.assert_not_called()
+    receiver.ack.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("processing_result", "ack_expected"),
+    [
+        pytest.param(
+            ProcessingCycleResult(
+                chunked_documents=1,
+                chunks_created=1,
+                embedded_documents=1,
+                embedded_chunks=1,
+                skipped_chunks=0,
+                input_tokens=10,
+            ),
+            True,
+            id="completed",
+        ),
+        pytest.param(
+            EMPTY_PROCESSING_CYCLE_RESULT,
+            True,
+            id="failure-bookkeeping-committed",
+        ),
+        pytest.param(None, False, id="deferred"),
+    ],
+)
+def test_queue_cycle_acknowledges_only_a_committed_result(
+    monkeypatch: pytest.MonkeyPatch,
+    processing_result: ProcessingCycleResult | None,
+    ack_expected: bool,
+) -> None:
+    delivery = make_queue_delivery()
+    receiver = Mock()
+    receiver.receive_one.return_value = delivery
+    process_next = Mock(return_value=processing_result)
+    monkeypatch.setattr("app.worker.process_next_document", process_next)
+    monkeypatch.setattr("app.worker._utc_now", Mock(return_value=AVAILABLE_AT))
+
+    session_factory = MagicMock()
+    provider = Mock()
+    redis_client = Mock()
+
+    result = process_one_queue_delivery(
+        session_factory=session_factory,
+        provider=provider,
+        redis_client=redis_client,
+        receiver=receiver,
+    )
+
+    assert result is processing_result
+    process_next.assert_called_once_with(
+        session_factory=session_factory,
+        provider=provider,
+        redis_client=redis_client,
+        available_at=AVAILABLE_AT,
+        message=delivery.message,
+    )
+    if ack_expected:
+        receiver.ack.assert_called_once_with(delivery)
+    else:
+        receiver.ack.assert_not_called()
+
+
+def test_queue_cycle_does_not_acknowledge_when_processing_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receiver = Mock()
+    receiver.receive_one.return_value = make_queue_delivery()
+    monkeypatch.setattr(
+        "app.worker.process_next_document",
+        Mock(side_effect=RuntimeError("database commit failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="database commit failed"):
+        process_one_queue_delivery(
+            session_factory=MagicMock(),
+            provider=Mock(),
+            redis_client=Mock(),
+            receiver=receiver,
+        )
+
+    receiver.ack.assert_not_called()
+
+
+def test_queue_cycle_surfaces_acknowledgment_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receiver = Mock()
+    receiver.receive_one.return_value = make_queue_delivery()
+    receiver.ack.side_effect = DocumentQueueUnavailableError("Document queue is unavailable")
+    monkeypatch.setattr(
+        "app.worker.process_next_document",
+        Mock(return_value=EMPTY_PROCESSING_CYCLE_RESULT),
+    )
+
+    with pytest.raises(DocumentQueueUnavailableError):
+        process_one_queue_delivery(
+            session_factory=MagicMock(),
+            provider=Mock(),
+            redis_client=Mock(),
+            receiver=receiver,
+        )
+
+    receiver.ack.assert_called_once_with(receiver.receive_one.return_value)
