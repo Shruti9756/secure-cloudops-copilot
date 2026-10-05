@@ -1,0 +1,112 @@
+"""Content-free SQS wake-up messages; PostgreSQL remains authoritative."""
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import ClassVar, Protocol, Self
+from uuid import UUID
+
+from botocore.exceptions import BotoCoreError, ClientError
+
+_EXPECTED_FIELDS = frozenset({"schema_version", "organization_id", "tenant_id", "document_id"})
+_MAX_BODY_BYTES = 512
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Document queue message has duplicate fields")
+        result[key] = value
+    return result
+
+
+def _canonical_uuid(value: object) -> UUID:
+    if not isinstance(value, str):
+        raise TypeError("Document queue IDs must be canonical UUID strings")
+    try:
+        parsed = UUID(value)
+    except ValueError:
+        raise ValueError("Document queue IDs must be canonical UUID strings") from None
+    if str(parsed) != value:
+        raise ValueError("Document queue IDs must be canonical UUID strings")
+    return parsed
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DocumentProcessingMessage:
+    organization_id: UUID
+    tenant_id: UUID
+    document_id: UUID
+    schema_version: ClassVar[int] = 1
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(value, UUID)
+            for value in (self.organization_id, self.tenant_id, self.document_id)
+        ):
+            raise TypeError("Document queue IDs must be UUID values")
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "schema_version": self.schema_version,
+                "organization_id": str(self.organization_id),
+                "tenant_id": str(self.tenant_id),
+                "document_id": str(self.document_id),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @classmethod
+    def from_json(cls, body: str) -> Self:
+        if not isinstance(body, str) or len(body.encode()) > _MAX_BODY_BYTES:
+            raise ValueError("Document queue message is invalid or too large")
+        try:
+            payload: object = json.loads(body, object_pairs_hook=_unique_object)
+        except ValueError:
+            raise ValueError("Document queue message is not valid JSON") from None
+        if not isinstance(payload, dict) or set(payload) != _EXPECTED_FIELDS:
+            raise ValueError("Document queue message fields are invalid")
+        if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+            raise ValueError("Document queue schema version is unsupported")
+        try:
+            return cls(
+                organization_id=_canonical_uuid(payload["organization_id"]),
+                tenant_id=_canonical_uuid(payload["tenant_id"]),
+                document_id=_canonical_uuid(payload["document_id"]),
+            )
+        except TypeError:
+            raise ValueError("Document queue message fields are invalid") from None
+
+
+class SqsSender(Protocol):
+    def send_message(self, *, QueueUrl: str, MessageBody: str) -> Mapping[str, object]: ...
+
+
+class DocumentQueueUnavailableError(RuntimeError):
+    """The queue did not acknowledge a message without exposing AWS details."""
+
+
+class SqsDocumentQueue:
+    """Use an injected sender; constructing this class makes no AWS call."""
+
+    def __init__(self, *, queue_url: str, sender: SqsSender) -> None:
+        if not queue_url.strip():
+            raise ValueError("SQS queue URL must not be empty")
+        self._queue_url = queue_url.strip()
+        self._sender = sender
+
+    def enqueue(self, message: DocumentProcessingMessage) -> str:
+        try:
+            response = self._sender.send_message(
+                QueueUrl=self._queue_url,
+                MessageBody=message.to_json(),
+            )
+        except BotoCoreError, ClientError:
+            raise DocumentQueueUnavailableError("Document queue is unavailable") from None
+        message_id = response.get("MessageId")
+        if not isinstance(message_id, str) or not message_id.strip():
+            raise DocumentQueueUnavailableError("Document queue did not acknowledge the message")
+        return message_id
