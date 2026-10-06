@@ -249,6 +249,46 @@ class KnowledgeDocument(Base):
     )
 
 
+class DocumentQueueOutbox(Base):
+    """An IDs-only document-processing hint awaiting queue publication."""
+
+    __tablename__ = "document_queue_outbox"
+    __table_args__ = (
+        Index(
+            "ix_document_queue_outbox_unpublished",
+            "published_at",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    organization_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
 class AuditEvent(Base):
     """An append-only-style record of a security-relevant application event."""
 

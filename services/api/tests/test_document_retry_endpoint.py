@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import AuditEvent, KnowledgeDocument, Tenant
+from app.db.models import AuditEvent, DocumentQueueOutbox, KnowledgeDocument, Tenant
 from app.main import (
     app,
     get_authorized_document_write_tenant,
@@ -87,7 +87,11 @@ def test_retry_failed_document_resets_state_commits_and_audits() -> None:
         app.dependency_overrides.clear()
 
     audit_event = session.add.call_args.args[0]
-
+    outbox_event = session.add.call_args_list[0].args[0]
+    assert isinstance(outbox_event, DocumentQueueOutbox)
+    assert outbox_event.organization_id == tenant.organization_id
+    assert outbox_event.tenant_id == tenant.id
+    assert outbox_event.document_id == document.id
     assert response.status_code == 200
     assert response.json() == {
         "status": "accepted",

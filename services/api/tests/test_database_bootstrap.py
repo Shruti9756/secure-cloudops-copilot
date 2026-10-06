@@ -16,6 +16,11 @@ def test_grants_cover_only_application_tables() -> None:
         "UPDATE",
         "DELETE",
     )
+    assert bootstrap.TABLE_GRANTS["document_queue_outbox"] == (
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+    )
 
 
 def test_bootstrap_rejects_non_staging_before_migration(monkeypatch) -> None:

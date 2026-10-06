@@ -68,6 +68,7 @@ from app.services.document_job_status import (
     DocumentJobStatusLookup,
     load_document_job_statuses,
 )
+from app.services.document_outbox import record_document_processing_intent
 from app.services.document_retry import reset_failed_document_for_retry
 from app.services.document_storage import (
     RedactedDocumentStore,
@@ -1190,6 +1191,7 @@ def retry_document(
         )
 
     reset_failed_document_for_retry(document)
+    record_document_processing_intent(session, document)
 
     record_document_retry_audit_event(
         session,

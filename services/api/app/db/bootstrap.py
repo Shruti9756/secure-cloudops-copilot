@@ -22,6 +22,7 @@ TABLE_GRANTS = {
     "memberships": ("SELECT", "INSERT"),
     "tenants": ("SELECT", "INSERT", "UPDATE"),
     "knowledge_documents": ("SELECT", "INSERT", "UPDATE"),
+    "document_queue_outbox": ("SELECT", "INSERT", "UPDATE"),
     "document_chunks": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "audit_events": ("SELECT", "INSERT"),
 }

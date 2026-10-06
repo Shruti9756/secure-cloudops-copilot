@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from app.services.document_access import (
     ORGANIZATION_DOCUMENT_ACCESS,
     DocumentAccessLevel,
 )
+from app.services.document_outbox import record_document_processing_intent
 from app.services.document_storage import RedactedDocumentStore
 from app.services.knowledge_revision import increment_knowledge_revision
 from app.services.redaction import RedactionResult, redact_sensitive_content
@@ -156,22 +158,24 @@ def ingest_document(
     if document is None:
         fallback_title = Path(source_path).stem.replace("-", " ").replace("_", " ").title()
         resolved_access_level = access_level or ORGANIZATION_DOCUMENT_ACCESS
-        session.add(
-            KnowledgeDocument(
-                tenant_id=tenant.id,
-                organization_id=tenant.organization_id,
-                title=extract_markdown_title(safe_content, fallback_title),
-                source_path=source_path,
-                source_sha256=content_hash,
-                content=safe_content,
-                ingestion_status="pending",
-                processing_attempt_count=0,
-                next_processing_attempt_at=None,
-                last_processing_failure_reason=None,
-                access_level=resolved_access_level,
-                document_metadata=document_metadata,
-            )
+        document = KnowledgeDocument(
+            id=uuid4(),
+            tenant_id=tenant.id,
+            organization_id=tenant.organization_id,
+            title=extract_markdown_title(safe_content, fallback_title),
+            source_path=source_path,
+            source_sha256=content_hash,
+            content=safe_content,
+            ingestion_status="pending",
+            processing_attempt_count=0,
+            next_processing_attempt_at=None,
+            last_processing_failure_reason=None,
+            access_level=resolved_access_level,
+            document_metadata=document_metadata,
         )
+        session.add(document)
+        session.flush()
+        record_document_processing_intent(session, document)
         increment_knowledge_revision(
             session,
             organization_id=tenant.organization_id,
@@ -191,6 +195,7 @@ def ingest_document(
     document.processing_attempt_count = 0
     document.next_processing_attempt_at = None
     document.last_processing_failure_reason = None
+    record_document_processing_intent(session, document)
     document.document_metadata = document_metadata
     increment_knowledge_revision(
         session,

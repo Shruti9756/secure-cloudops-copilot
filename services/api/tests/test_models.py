@@ -1,4 +1,4 @@
-from app.db.models import AuditEvent, DocumentChunk, KnowledgeDocument, Tenant
+from app.db.models import AuditEvent, DocumentChunk, DocumentQueueOutbox, KnowledgeDocument, Tenant
 
 
 def test_knowledge_document_has_direct_tenant_and_organization_ownership() -> None:
@@ -97,3 +97,23 @@ def test_tenant_knowledge_revision_is_required_and_nonnegative() -> None:
     assert revision_column.nullable is False
     assert str(revision_column.server_default.arg) == "0"
     assert "ck_tenants_knowledge_revision_nonnegative" in constraint_names
+
+
+def test_document_queue_outbox_contains_only_scoped_ids_and_delivery_state() -> None:
+    table = DocumentQueueOutbox.__table__
+
+    assert set(table.c.keys()) == {
+        "id",
+        "organization_id",
+        "tenant_id",
+        "document_id",
+        "created_at",
+        "published_at",
+    }
+    assert {foreign_key.target_fullname for foreign_key in table.foreign_keys} == {
+        "organizations.id",
+        "tenants.id",
+        "knowledge_documents.id",
+    }
+    assert table.c.published_at.nullable is True
+    assert "ix_document_queue_outbox_unpublished" in {index.name for index in table.indexes}

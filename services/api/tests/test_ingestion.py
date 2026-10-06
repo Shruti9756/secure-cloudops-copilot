@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.db.models import KnowledgeDocument, Tenant
+from app.db.models import DocumentQueueOutbox, KnowledgeDocument, Tenant
 from app.infrastructure.s3 import S3DocumentReference
 from app.services.document_access import RESTRICTED_DOCUMENT_ACCESS
 from app.services.ingestion import (
@@ -93,7 +93,7 @@ def test_ingest_document_redacts_content_before_storing_it() -> None:
         content_type="text/markdown",
     )
 
-    stored_document = session.add.call_args.args[0]
+    stored_document = session.add.call_args_list[0].args[0]
 
     assert result.action == "created"
     assert isinstance(stored_document, KnowledgeDocument)
@@ -144,7 +144,7 @@ def test_ingest_document_mirrors_only_redacted_content_when_store_is_configured(
         document_store=document_store,
     )
 
-    stored_document = session.add.call_args.args[0]
+    stored_document = session.add.call_args_list[0].args[0]
     expected_safe_content = (
         "Authorization: Bearer [REDACTED: BEARER_TOKEN]\nInspect Redis eviction policy."
     )
@@ -194,7 +194,7 @@ def test_ingest_document_redacts_pii_before_database_and_s3_storage() -> None:
         document_store=document_store,
     )
 
-    stored_document = session.add.call_args.args[0]
+    stored_document = session.add.call_args_list[0].args[0]
     expected_safe_content = (
         "On-call email: [REDACTED: EMAIL_ADDRESS]\n"
         "Mobile: [REDACTED: PHONE_NUMBER]\n"
@@ -384,6 +384,12 @@ def test_ingestion_increments_revision_only_for_knowledge_changes(
     )
 
     assert result.action == expected_action
+    outbox_events = [
+        call.args[0]
+        for call in session.add.call_args_list
+        if isinstance(call.args[0], DocumentQueueOutbox)
+    ]
+    assert len(outbox_events) == (1 if scenario in {"created", "content_changed"} else 0)
     if should_increment:
         increment_revision.assert_called_once_with(
             session,
