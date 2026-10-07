@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -24,6 +25,7 @@ from app.infrastructure.ollama import (
     OllamaEmbeddingClient,
 )
 from app.infrastructure.redis import get_redis_client
+from app.infrastructure.sqs import build_sqs_document_receiver
 from app.services.chunking import replace_document_chunks
 from app.services.document_job_status import (
     DocumentJobStage,
@@ -38,7 +40,11 @@ from app.services.document_lock import (
     release_document_lock,
     renew_document_lock,
 )
-from app.services.document_queue import DocumentProcessingMessage, SqsDocumentReceiver
+from app.services.document_queue import (
+    DocumentProcessingMessage,
+    DocumentQueueUnavailableError,
+    SqsDocumentReceiver,
+)
 from app.services.document_retry import (
     DEFAULT_PROCESSING_MAX_ATTEMPTS,
     PROCESSABLE_DOCUMENT_STATUSES,
@@ -523,7 +529,12 @@ def process_one_queue_delivery(
     receiver: SqsDocumentReceiver,
 ) -> ProcessingCycleResult | None:
     """Process one SQS hint; database polling remains responsible for due retries."""
-    delivery = receiver.receive_one()
+    try:
+        delivery = receiver.receive_one()
+    except TypeError, ValueError:
+        LOGGER.warning("Invalid document queue delivery was rejected without acknowledgment.")
+        return None
+
     if delivery is None:
         return None
 
@@ -616,44 +627,94 @@ def process_all_tenant_documents(
     return _summarize_processing_results(results)
 
 
-def main() -> None:
-    """Run the local worker forever; Docker restarts it only if the process exits."""
+def process_worker_cycle(
+    *,
+    session_factory: sessionmaker[Session],
+    provider: EmbeddingProvider,
+    redis_client: DocumentWorkerRedisClient,
+    receiver: SqsDocumentReceiver | None = None,
+    tenant_scope: str | None = None,
+) -> ProcessingCycleResult:
+    """Handle one optional queue hint, then retain the database due-work sweep."""
+    if tenant_scope is not None:
+        tenant_scope = tenant_scope.strip() or None
 
+    if receiver is not None and tenant_scope is not None:
+        raise ValueError("SQS document processing requires an unscoped worker.")
+
+    queue_result: ProcessingCycleResult | None = None
+    if receiver is not None:
+        try:
+            queue_result = process_one_queue_delivery(
+                session_factory=session_factory,
+                provider=provider,
+                redis_client=redis_client,
+                receiver=receiver,
+            )
+        except DocumentQueueUnavailableError, SQLAlchemyError:
+            LOGGER.warning("Document queue handling did not finish; continuing database polling.")
+
+    if tenant_scope is None:
+        database_result = process_all_tenant_documents(
+            session_factory=session_factory,
+            provider=provider,
+            redis_client=redis_client,
+        )
+    else:
+        database_result = process_one_cycle(
+            session_factory=session_factory,
+            tenant_slug=tenant_scope,
+            provider=provider,
+            redis_client=redis_client,
+        )
+
+    if queue_result is None:
+        return database_result
+
+    return _summarize_processing_results([queue_result, database_result])
+
+
+def main() -> None:
+    """Run the worker with optional SQS hints and retained database polling."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
     settings = get_settings()
-    session_factory = get_session_factory()
-    redis_client = get_redis_client()
-    provider = build_worker_embedding_provider(
-        redis_client=redis_client,
-    )
     tenant_scope = settings.document_processor_tenant_slug
-
     if tenant_scope is not None:
         tenant_scope = tenant_scope.strip() or None
 
+    if settings.document_queue_backend == "sqs" and tenant_scope is not None:
+        raise ValueError(
+            "SQS document processing requires DOCUMENT_PROCESSOR_TENANT_SLUG to be unset."
+        )
+
+    receiver = (
+        build_sqs_document_receiver(settings) if settings.document_queue_backend == "sqs" else None
+    )
+    session_factory = get_session_factory()
+    redis_client = get_redis_client()
+    provider = build_worker_embedding_provider(redis_client=redis_client)
+
     LOGGER.info(
-        "Document worker started for tenant_scope=%s with poll_interval_seconds=%s",
+        "Document worker started for tenant_scope=%s with queue_mode=%s "
+        "and poll_interval_seconds=%s",
         tenant_scope or "all",
+        "sqs+database" if receiver is not None else "database-only",
         settings.document_processor_poll_interval_seconds,
     )
 
     while True:
         try:
-            if tenant_scope is None:
-                result = process_all_tenant_documents(
-                    session_factory=session_factory, provider=provider, redis_client=redis_client
-                )
-            else:
-                result = process_one_cycle(
-                    session_factory=session_factory,
-                    tenant_slug=tenant_scope,
-                    provider=provider,
-                    redis_client=redis_client,
-                )
+            result = process_worker_cycle(
+                session_factory=session_factory,
+                provider=provider,
+                redis_client=redis_client,
+                receiver=receiver,
+                tenant_scope=tenant_scope,
+            )
         except Exception:
             LOGGER.exception("Document processing cycle failed; it will retry later")
         else:
