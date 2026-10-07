@@ -21,3 +21,12 @@ output "execution_role_names" {
     service => role.name
   }
 }
+
+output "task_role_names" {
+  description = "Application task role name for each ECS application."
+
+  value = {
+    for service, role in aws_iam_role.task :
+    service => role.name
+  }
+}

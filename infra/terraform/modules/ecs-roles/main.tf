@@ -8,7 +8,8 @@ terraform {
 }
 
 locals {
-  services = toset(["api", "web", "worker"])
+  services      = toset(["api", "web", "worker"])
+  task_services = setunion(local.services, toset(["publisher"]))
 }
 
 data "aws_iam_policy_document" "ecs_tasks_trust" {
@@ -51,7 +52,7 @@ resource "aws_iam_role_policy_attachment" "execution" {
 }
 
 resource "aws_iam_role" "task" {
-  for_each = local.services
+  for_each = local.task_services
 
   name               = "${var.name_prefix}-${each.key}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_trust.json
