@@ -100,3 +100,15 @@ variable "staging_frontend_origin" {
     error_message = "Use a single HTTPS website origin without a path or trailing slash."
   }
 }
+
+variable "staging_document_queue_backend" {
+  description = "Worker queue mode. Keep disabled until a reviewed live SQS test is ready."
+  type        = string
+  default     = "disabled"
+  nullable    = false
+
+  validation {
+    condition     = contains(["disabled", "sqs"], var.staging_document_queue_backend)
+    error_message = "staging_document_queue_backend must be disabled or sqs."
+  }
+}

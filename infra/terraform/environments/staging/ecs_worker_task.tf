@@ -22,6 +22,11 @@ resource "aws_ecs_task_definition" "worker" {
     environment = [
       { name = "APP_ENV", value = "staging" },
       { name = "AWS_REGION", value = var.aws_region },
+      { name = "DOCUMENT_QUEUE_BACKEND", value = var.staging_document_queue_backend },
+      {
+        name  = "DOCUMENT_QUEUE_SQS_URL"
+        value = var.staging_document_queue_backend == "sqs" ? aws_sqs_queue.document_processing.id : ""
+      },
       { name = "DATABASE_HOST", value = aws_db_instance.staging[0].address },
       { name = "DATABASE_PORT", value = tostring(aws_db_instance.staging[0].port) },
       { name = "DATABASE_NAME", value = aws_db_instance.staging[0].db_name },
@@ -53,6 +58,7 @@ resource "aws_ecs_task_definition" "worker" {
   }])
 
   depends_on = [
+    aws_iam_role_policy.document_queue_consume,
     aws_iam_role_policy.worker_secrets_read,
     aws_secretsmanager_secret_version.api_database_password,
     aws_secretsmanager_secret_version.cache_auth,

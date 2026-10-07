@@ -4,6 +4,8 @@ aws_account_id = "123456789012"
 
 environment = "staging"
 runtime_enabled = false
+# Keep disabled until the publisher, worker image, and live-test procedure are ready.
+staging_document_queue_backend = "disabled"
 owner       = "your-name-or-team"
 cost_center = "personal-learning"
 network_vpc_cidr           = "10.41.0.0/16"
