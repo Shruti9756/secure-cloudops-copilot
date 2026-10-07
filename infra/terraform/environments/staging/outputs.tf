@@ -49,3 +49,14 @@ output "worker_task_definition_arn" {
   description = "Staging worker task definition; the worker service starts with zero running tasks."
   value       = try(aws_ecs_task_definition.worker[0].arn, null)
 }
+
+output "document_queue_summary" {
+  description = "Staging document-processing queue and dead-letter queue addresses."
+
+  value = {
+    queue_url = aws_sqs_queue.document_processing.id
+    queue_arn = aws_sqs_queue.document_processing.arn
+    dlq_url   = aws_sqs_queue.document_processing_dlq.id
+    dlq_arn   = aws_sqs_queue.document_processing_dlq.arn
+  }
+}
