@@ -58,6 +58,10 @@ class Settings(BaseSettings):
         ge=1,
         le=300,
     )
+    # Queue publishing stays opt-in; the existing local worker is unchanged.
+    document_queue_backend: Literal["disabled", "sqs"] = "disabled"
+    document_queue_sqs_url: str | None = None
+    document_outbox_poll_interval_seconds: int = Field(default=5, ge=1, le=300)
     # Local Python uses loopback; Docker Compose overrides this with the ollama service name.
     ollama_base_url: str = "http://127.0.0.1:11434"
     embedding_provider: Literal["ollama", "bedrock"] = "ollama"
@@ -78,6 +82,14 @@ class Settings(BaseSettings):
         extra="ignore",
         hide_input_in_errors=True,
     )
+
+    @model_validator(mode="after")
+    def validate_document_queue(self) -> Self:
+        if self.document_queue_backend == "sqs" and (
+            self.document_queue_sqs_url is None or not self.document_queue_sqs_url.strip()
+        ):
+            raise ValueError("Set DOCUMENT_QUEUE_SQS_URL before enabling SQS publishing.")
+        return self
 
     @model_validator(mode="after")
     def validate_database_connection(self) -> Self:
