@@ -97,6 +97,15 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
       DOCUMENT_PROCESSOR_POLL_INTERVAL_SECONDS: 5
+      # Optional queue hints; database polling remains active.
+      DOCUMENT_QUEUE_BACKEND: ${DOCUMENT_QUEUE_BACKEND:-disabled}
+      DOCUMENT_QUEUE_SQS_URL: ${DOCUMENT_QUEUE_SQS_URL:-}
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      HOME: /app
+    volumes:
+      # Same read-only local credential mount used by the API.
+      - "${USERPROFILE}/.aws:/app/.aws:ro"
     depends_on:
       postgres:
         condition: service_healthy
