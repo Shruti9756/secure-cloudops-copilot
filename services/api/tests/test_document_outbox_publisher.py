@@ -1,7 +1,7 @@
 """Offline settings, AWS-construction, and publisher-runner tests."""
 
 import os
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -9,7 +9,10 @@ from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import document_outbox_publisher as publisher
-from app.core.config import Settings
+from app.core import config as core_config
+from app.core.config import DocumentOutboxPublisherSettings
+from app.db import session as database_session
+from app.infrastructure import postgres
 from app.infrastructure.sqs import build_sqs_document_queue
 from app.services.document_queue import (
     DocumentProcessingMessage,
@@ -19,15 +22,83 @@ from app.services.document_queue import (
 FAKE_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/000000000000/synthetic-test"
 
 
-def make_settings(**overrides: object) -> Settings:
+def make_settings(**overrides: object) -> DocumentOutboxPublisherSettings:
     values = {
         "database_url": "postgresql+psycopg://local:localpass@localhost/localdb",
-        "redis_url": "redis://localhost:6379/0",
     }
     values.update(overrides)
-    # Ignore the real .env and temporary shell settings in these offline tests.
     with patch.dict(os.environ, {}, clear=True):
-        return Settings(_env_file=None, **values)
+        return DocumentOutboxPublisherSettings(_env_file=None, **values)
+
+
+@pytest.fixture
+def main_dependencies(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    settings = make_settings(
+        document_queue_backend="sqs",
+        document_queue_sqs_url=FAKE_QUEUE_URL,
+        document_outbox_poll_interval_seconds=7,
+    )
+    dependencies = Mock()
+    dependencies.load_settings.return_value = settings
+    dependencies.resolve_database_url.return_value = postgres.resolve_database_url(settings)
+
+    for target, replacement in (
+        ("get_document_outbox_publisher_settings", dependencies.load_settings),
+        ("resolve_database_url", dependencies.resolve_database_url),
+        ("create_engine", dependencies.create_engine),
+        ("sessionmaker", dependencies.sessionmaker),
+        ("build_sqs_document_queue", dependencies.build_sqs_document_queue),
+        ("run_publisher", dependencies.run_publisher),
+    ):
+        monkeypatch.setattr(publisher, target, replacement)
+
+    for module, name in (
+        (core_config, "get_settings"),
+        (database_session, "get_session_factory"),
+        (postgres, "get_engine"),
+        (postgres, "get_settings"),
+        (database_session, "get_engine"),
+    ):
+        monkeypatch.setattr(
+            module,
+            name,
+            Mock(side_effect=AssertionError(f"Unexpected global dependency: {name}")),
+        )
+
+    for name in ("get_settings", "get_session_factory", "get_engine"):
+        monkeypatch.setattr(
+            publisher,
+            name,
+            Mock(side_effect=AssertionError(f"Unexpected publisher dependency: {name}")),
+            raising=False,
+        )
+
+    return dependencies
+
+
+def expected_enabled_calls(dependencies: Mock) -> list[object]:
+    settings = dependencies.load_settings.return_value
+    engine = dependencies.create_engine.return_value
+    return [
+        call.load_settings(),
+        call.resolve_database_url(settings),
+        call.create_engine(
+            dependencies.resolve_database_url.return_value,
+            pool_pre_ping=True,
+        ),
+        call.sessionmaker(
+            bind=engine,
+            autoflush=False,
+            expire_on_commit=False,
+        ),
+        call.build_sqs_document_queue(settings),
+        call.run_publisher(
+            session_factory=dependencies.sessionmaker.return_value,
+            queue=dependencies.build_sqs_document_queue.return_value,
+            poll_interval_seconds=7,
+        ),
+        call.create_engine().dispose(),
+    ]
 
 
 def test_queue_publishing_defaults_to_disabled() -> None:
@@ -165,38 +236,63 @@ def test_unexpected_runner_errors_are_not_swallowed() -> None:
     sleeper.assert_not_called()
 
 
-def test_disabled_main_constructs_neither_queue_nor_database_factory() -> None:
-    with (
-        patch.object(publisher, "get_settings", return_value=make_settings()),
-        patch.object(publisher, "build_sqs_document_queue") as build_queue,
-        patch.object(publisher, "get_session_factory") as build_factory,
-        patch.object(publisher, "run_publisher") as run,
-    ):
+def test_disabled_main_constructs_neither_queue_nor_database_factory(
+    main_dependencies: Mock,
+) -> None:
+    main_dependencies.load_settings.return_value = make_settings(database_url=None)
+
+    publisher.main()
+
+    assert main_dependencies.mock_calls == [call.load_settings()]
+    main_dependencies.resolve_database_url.assert_not_called()
+    main_dependencies.create_engine.assert_not_called()
+    main_dependencies.sessionmaker.assert_not_called()
+    main_dependencies.build_sqs_document_queue.assert_not_called()
+    main_dependencies.run_publisher.assert_not_called()
+
+
+def test_enabled_main_wires_dependencies_and_handles_keyboard_interrupt(
+    main_dependencies: Mock,
+) -> None:
+    main_dependencies.run_publisher.side_effect = KeyboardInterrupt
+
+    publisher.main()
+
+    assert main_dependencies.mock_calls == expected_enabled_calls(main_dependencies)
+    main_dependencies.create_engine.return_value.dispose.assert_called_once_with()
+
+
+def test_enabled_main_disposes_local_engine_after_normal_return(
+    main_dependencies: Mock,
+) -> None:
+    publisher.main()
+
+    assert main_dependencies.mock_calls == expected_enabled_calls(main_dependencies)
+    main_dependencies.create_engine.return_value.dispose.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("failing_dependency", "expected_call_count"),
+    [
+        ("sessionmaker", 4),
+        ("build_sqs_document_queue", 5),
+        ("run_publisher", 6),
+    ],
+)
+def test_enabled_main_disposes_engine_and_propagates_unexpected_failures(
+    main_dependencies: Mock,
+    failing_dependency: str,
+    expected_call_count: int,
+) -> None:
+    getattr(main_dependencies, failing_dependency).side_effect = RuntimeError(
+        "synthetic-programming-error"
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic-programming-error"):
         publisher.main()
 
-    build_queue.assert_not_called()
-    build_factory.assert_not_called()
-    run.assert_not_called()
-
-
-def test_enabled_main_wires_dependencies_and_handles_keyboard_interrupt() -> None:
-    settings = make_settings(
-        document_queue_backend="sqs",
-        document_queue_sqs_url=FAKE_QUEUE_URL,
-        document_outbox_poll_interval_seconds=7,
+    expected = expected_enabled_calls(main_dependencies)
+    assert main_dependencies.mock_calls == (
+        expected[:expected_call_count] + [call.create_engine().dispose()]
     )
-    with (
-        patch.object(publisher, "get_settings", return_value=settings),
-        patch.object(publisher, "build_sqs_document_queue") as build_queue,
-        patch.object(publisher, "get_session_factory") as build_factory,
-        patch.object(publisher, "run_publisher", side_effect=KeyboardInterrupt) as run,
-    ):
-        publisher.main()
-
-    build_queue.assert_called_once_with(settings)
-    build_factory.assert_called_once_with()
-    run.assert_called_once_with(
-        session_factory=build_factory.return_value,
-        queue=build_queue.return_value,
-        poll_interval_seconds=7,
-    )
+    main_dependencies.create_engine.return_value.dispose.assert_called_once_with()

@@ -3,7 +3,7 @@ from functools import lru_cache
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine, make_url
 
-from app.core.config import Settings, get_settings
+from app.core.config import DocumentOutboxPublisherSettings, Settings, get_settings
 
 
 def build_staging_database_url(
@@ -25,7 +25,7 @@ def build_staging_database_url(
     )
 
 
-def resolve_database_url(settings: Settings) -> URL:
+def resolve_database_url(settings: Settings | DocumentOutboxPublisherSettings) -> URL:
     if settings.database_url is not None:
         return make_url(settings.database_url.get_secret_value())
 

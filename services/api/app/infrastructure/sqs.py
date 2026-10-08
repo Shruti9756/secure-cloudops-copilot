@@ -3,11 +3,13 @@
 import boto3
 from botocore.config import Config
 
-from app.core.config import Settings
+from app.core.config import DocumentOutboxPublisherSettings, Settings
 from app.services.document_queue import SqsDocumentQueue, SqsDocumentReceiver
 
 
-def build_sqs_document_queue(settings: Settings) -> SqsDocumentQueue:
+def build_sqs_document_queue(
+    settings: Settings | DocumentOutboxPublisherSettings,
+) -> SqsDocumentQueue:
     if settings.document_queue_backend != "sqs":
         raise ValueError("SQS publishing is disabled.")
 

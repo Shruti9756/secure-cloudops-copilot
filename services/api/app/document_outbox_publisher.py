@@ -4,11 +4,12 @@ import logging
 import time
 from collections.abc import Callable
 
+from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import get_settings
-from app.db.session import get_session_factory
+from app.core.config import get_document_outbox_publisher_settings
+from app.infrastructure.postgres import resolve_database_url
 from app.infrastructure.sqs import build_sqs_document_queue
 from app.services.document_outbox_dispatcher import publish_one_document_intent
 from app.services.document_queue import DocumentQueueUnavailableError, SqsDocumentQueue
@@ -45,16 +46,23 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    settings = get_settings()
+    settings = get_document_outbox_publisher_settings()
 
     if settings.document_queue_backend == "disabled":
         LOGGER.info("Document outbox publisher is disabled.")
         return
 
-    queue = build_sqs_document_queue(settings)
-    session_factory = get_session_factory()
-
+    engine = create_engine(
+        resolve_database_url(settings),
+        pool_pre_ping=True,
+    )
     try:
+        session_factory = sessionmaker(
+            bind=engine,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+        queue = build_sqs_document_queue(settings)
         run_publisher(
             session_factory=session_factory,
             queue=queue,
@@ -62,6 +70,8 @@ def main() -> None:
         )
     except KeyboardInterrupt:
         LOGGER.info("Document outbox publisher stopped.")
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

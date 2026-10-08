@@ -19,6 +19,41 @@ def find_env_file() -> Path | None:
 ENV_FILE = find_env_file()
 
 
+def _validate_database_configuration(
+    *,
+    database_url: SecretStr | None,
+    database_host: str | None,
+    database_name: str | None,
+    database_username: str | None,
+    database_password: SecretStr | None,
+) -> None:
+    split_values = (
+        database_host,
+        database_name,
+        database_username,
+        database_password,
+    )
+
+    if database_url is not None:
+        if not database_url.get_secret_value().strip() or any(
+            value is not None for value in split_values
+        ):
+            raise ValueError("Configure DATABASE_URL or complete split database settings.")
+        return
+
+    if (
+        database_host is None
+        or not database_host.strip()
+        or database_name is None
+        or not database_name.strip()
+        or database_username is None
+        or not database_username.strip()
+        or database_password is None
+        or not database_password.get_secret_value()
+    ):
+        raise ValueError("Configure DATABASE_URL or complete split database settings.")
+
+
 class Settings(BaseSettings):
     app_env: str = "development"
     # Local mode remains the default until Cognito browser login is configured.
@@ -93,32 +128,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_database_connection(self) -> Self:
-        split_values = (
-            self.database_host,
-            self.database_name,
-            self.database_username,
-            self.database_password,
+        _validate_database_configuration(
+            database_url=self.database_url,
+            database_host=self.database_host,
+            database_name=self.database_name,
+            database_username=self.database_username,
+            database_password=self.database_password,
         )
-
-        if self.database_url is not None:
-            if not self.database_url.get_secret_value().strip() or any(
-                value is not None for value in split_values
-            ):
-                raise ValueError("Configure DATABASE_URL or complete split database settings.")
-            return self
-
-        if (
-            self.database_host is None
-            or not self.database_host.strip()
-            or self.database_name is None
-            or not self.database_name.strip()
-            or self.database_username is None
-            or not self.database_username.strip()
-            or self.database_password is None
-            or not self.database_password.get_secret_value()
-        ):
-            raise ValueError("Configure DATABASE_URL or complete split database settings.")
-
         return self
 
     @model_validator(mode="after")
@@ -153,3 +169,46 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+class DocumentOutboxPublisherSettings(BaseSettings):
+    """Only the configuration needed by the standalone outbox publisher."""
+
+    database_url: SecretStr | None = None
+    database_host: str | None = None
+    database_port: int = Field(default=5432, ge=1, le=65535)
+    database_name: str | None = None
+    database_username: str | None = None
+    database_password: SecretStr | None = None
+    document_queue_backend: Literal["disabled", "sqs"] = "disabled"
+    document_queue_sqs_url: str | None = None
+    document_outbox_poll_interval_seconds: int = Field(default=5, ge=1, le=300)
+    aws_profile: str | None = None
+    aws_region: str = "us-east-1"
+
+    model_config = SettingsConfigDict(
+        env_file=ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    @model_validator(mode="after")
+    def validate_enabled_publisher(self) -> Self:
+        if self.document_queue_backend == "sqs":
+            if self.document_queue_sqs_url is None or not self.document_queue_sqs_url.strip():
+                raise ValueError("Set DOCUMENT_QUEUE_SQS_URL before enabling SQS publishing.")
+
+            _validate_database_configuration(
+                database_url=self.database_url,
+                database_host=self.database_host,
+                database_name=self.database_name,
+                database_username=self.database_username,
+                database_password=self.database_password,
+            )
+        return self
+
+
+@lru_cache
+def get_document_outbox_publisher_settings() -> DocumentOutboxPublisherSettings:
+    return DocumentOutboxPublisherSettings()
