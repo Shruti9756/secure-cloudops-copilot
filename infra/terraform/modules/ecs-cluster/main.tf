@@ -8,7 +8,7 @@ terraform {
 }
 
 locals {
-  services = toset(["api", "web", "worker"])
+  services = toset(["api", "web", "worker", "publisher"])
 }
 
 resource "aws_ecs_cluster" "this" {

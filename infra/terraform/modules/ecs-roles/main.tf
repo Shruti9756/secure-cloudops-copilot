@@ -38,14 +38,14 @@ data "aws_iam_policy_document" "ecs_tasks_trust" {
 }
 
 resource "aws_iam_role" "execution" {
-  for_each = local.services
+  for_each = local.task_services
 
   name               = "${var.name_prefix}-${each.key}-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_trust.json
 }
 
 resource "aws_iam_role_policy_attachment" "execution" {
-  for_each = local.services
+  for_each = local.task_services
 
   role       = aws_iam_role.execution[each.key].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
