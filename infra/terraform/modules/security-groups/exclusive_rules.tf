@@ -54,10 +54,13 @@ resource "aws_vpc_security_group_rules_exclusive" "worker" {
 resource "aws_vpc_security_group_rules_exclusive" "database" {
   security_group_id = aws_security_group.database.id
 
-  ingress_rule_ids = [
-    aws_vpc_security_group_ingress_rule.database_from_api.id,
-    aws_vpc_security_group_ingress_rule.database_from_worker.id,
-  ]
+  ingress_rule_ids = concat(
+    [
+      aws_vpc_security_group_ingress_rule.database_from_api.id,
+      aws_vpc_security_group_ingress_rule.database_from_worker.id,
+    ],
+    aws_vpc_security_group_ingress_rule.database_from_publisher[*].id,
+  )
 
   egress_rule_ids = []
 }
@@ -71,4 +74,16 @@ resource "aws_vpc_security_group_rules_exclusive" "cache" {
   ]
 
   egress_rule_ids = []
+}
+
+resource "aws_vpc_security_group_rules_exclusive" "publisher" {
+  count             = var.enable_publisher ? 1 : 0
+  security_group_id = aws_security_group.publisher[0].id
+
+  ingress_rule_ids = []
+
+  egress_rule_ids = concat(
+    aws_vpc_security_group_egress_rule.publisher_to_database[*].id,
+    aws_vpc_security_group_egress_rule.publisher_https[*].id,
+  )
 }

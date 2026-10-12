@@ -67,3 +67,14 @@ resource "aws_vpc_security_group_ingress_rule" "cache_from_worker" {
   to_port                      = var.cache_port
   ip_protocol                  = "tcp"
 }
+
+resource "aws_vpc_security_group_ingress_rule" "database_from_publisher" {
+  count             = var.enable_publisher ? 1 : 0
+  description       = "Allow PostgreSQL connections from the outbox publisher."
+  security_group_id = aws_security_group.database.id
+
+  referenced_security_group_id = aws_security_group.publisher[0].id
+  from_port                    = var.database_port
+  to_port                      = var.database_port
+  ip_protocol                  = "tcp"
+}

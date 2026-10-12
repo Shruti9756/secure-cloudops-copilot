@@ -63,3 +63,15 @@ resource "aws_security_group" "cache" {
     SecurityTier = "data"
   }
 }
+
+resource "aws_security_group" "publisher" {
+  count       = var.enable_publisher ? 1 : 0
+  name        = "${var.name_prefix}-publisher"
+  description = "Document outbox publisher traffic boundary."
+  vpc_id      = var.vpc_id
+
+  tags = {
+    Name         = "${var.name_prefix}-publisher"
+    SecurityTier = "application"
+  }
+}

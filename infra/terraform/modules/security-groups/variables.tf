@@ -83,3 +83,10 @@ variable "allow_public_https_egress" {
   type        = bool
   default     = false
 }
+
+variable "enable_publisher" {
+  description = "Create the dedicated document outbox publisher traffic boundary."
+  type        = bool
+  default     = false
+  nullable    = false
+}

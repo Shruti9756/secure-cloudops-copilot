@@ -87,3 +87,24 @@ resource "aws_vpc_security_group_egress_rule" "worker_https" {
   to_port           = 443
   ip_protocol       = "tcp"
 }
+
+resource "aws_vpc_security_group_egress_rule" "publisher_to_database" {
+  count             = var.enable_publisher ? 1 : 0
+  description       = "Allow the outbox publisher to connect to PostgreSQL."
+  security_group_id = aws_security_group.publisher[0].id
+
+  referenced_security_group_id = aws_security_group.database.id
+  from_port                    = var.database_port
+  to_port                      = var.database_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "publisher_https" {
+  count             = var.enable_publisher && var.allow_public_https_egress ? 1 : 0
+  description       = "Allow outbox publisher outbound HTTPS."
+  security_group_id = aws_security_group.publisher[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+}
