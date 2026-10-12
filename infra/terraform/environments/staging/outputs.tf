@@ -60,3 +60,8 @@ output "document_queue_summary" {
     dlq_arn   = aws_sqs_queue.document_processing_dlq.arn
   }
 }
+
+output "publisher_task_definition_arn" {
+  description = "Staging outbox publisher task definition; the publisher service starts with zero running tasks."
+  value       = try(aws_ecs_task_definition.publisher[0].arn, null)
+}
