@@ -5,8 +5,15 @@ resource "aws_ecs_service" "api" {
   task_definition = aws_ecs_task_definition.api[0].arn
   launch_type     = "FARGATE"
 
-  # Define the service without starting a container yet.
-  desired_count = 0
+  # Register the service without starting a container.
+  desired_count                     = 0
+  health_check_grace_period_seconds = 60
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api[0].arn
+    container_name   = "api"
+    container_port   = 8000
+  }
 
   network_configuration {
     subnets          = module.network.public_subnet_ids
@@ -17,4 +24,9 @@ resource "aws_ecs_service" "api" {
   tags = {
     Name = "secure-cloudops-${var.environment}-api"
   }
+
+  depends_on = [
+    aws_lb_listener.api_http,
+    module.security_groups,
+  ]
 }

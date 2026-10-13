@@ -65,3 +65,15 @@ output "publisher_task_definition_arn" {
   description = "Staging outbox publisher task definition; the publisher service starts with zero running tasks."
   value       = try(aws_ecs_task_definition.publisher[0].arn, null)
 }
+
+output "api_load_balancer" {
+  description = "Private API entry identifiers for later CloudFront VPC-origin wiring."
+
+  value = try({
+    arn               = aws_lb.api[0].arn
+    dns_name          = aws_lb.api[0].dns_name
+    target_group_arn  = aws_lb_target_group.api[0].arn
+    listener_arn      = aws_lb_listener.api_http[0].arn
+    security_group_id = aws_security_group.api_private_alb[0].id
+  }, null)
+}

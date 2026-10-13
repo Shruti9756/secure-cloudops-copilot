@@ -24,9 +24,12 @@ resource "aws_vpc_security_group_rules_exclusive" "frontend" {
 resource "aws_vpc_security_group_rules_exclusive" "api" {
   security_group_id = aws_security_group.api.id
 
-  ingress_rule_ids = [
-    aws_vpc_security_group_ingress_rule.api_from_load_balancer.id,
-  ]
+  ingress_rule_ids = concat(
+    [
+      aws_vpc_security_group_ingress_rule.api_from_load_balancer.id,
+    ],
+    var.additional_api_ingress_rule_ids,
+  )
 
   egress_rule_ids = concat(
     [

@@ -90,3 +90,10 @@ variable "enable_publisher" {
   default     = false
   nullable    = false
 }
+
+variable "additional_api_ingress_rule_ids" {
+  description = "Additional API ingress rule IDs the exclusive rule manager must retain."
+  type        = list(string)
+  default     = []
+  nullable    = false
+}
