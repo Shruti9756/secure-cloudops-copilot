@@ -4,3 +4,7 @@ aws_account_id = "123456789012"
 environment    = "staging"
 owner          = "your-name"
 cost_center    = "personal-learning"
+# Keep disabled until a reviewed runtime test session.
+staging_api_connection_mode = "disabled"
+staging_api_alb_arn          = ""
+staging_api_alb_dns_name     = ""

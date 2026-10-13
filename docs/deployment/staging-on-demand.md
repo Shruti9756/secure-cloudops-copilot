@@ -188,6 +188,36 @@ A task being `STOPPED` only means it finished; **exit code `0`** is what confirm
 
 ## End a test session
 
+### CloudFront API connection shutdown gate
+
+Do not delete the runtime ALB while CloudFront still uses its VPC origin.
+
+The separate `staging-frontend` root controls `staging_api_connection_mode`:
+
+- `disabled`: no API VPC origin and no API distribution routing.
+- `prepared`: the API VPC origin exists but is detached from the distribution.
+- `attached`: the distribution routes `/api/*` through that VPC origin.
+
+Keep this mode `disabled` until a reviewed test session. During a future session,
+use the real ARN and DNS name from the same active staging API ALB.
+
+If the connection is attached, shutdown must follow this order:
+
+1. Change the frontend mode from `attached` to `prepared`. Review and apply
+   that frontend-only change, then verify the distribution is `Deployed`.
+2. Change the frontend mode from `prepared` to `disabled`. Review and apply
+   that frontend-only change, then verify the VPC origin has been deleted.
+3. Only then review and apply the platform's `runtime_enabled=false` plan.
+
+If the connection is already disabled, no CloudFront detachment is needed.
+
+Never change the VPC origin's ALB ARN while it is attached. Never use
+`terraform destroy` on the frontend root to perform this shutdown.
+The website and staging Cognito must remain intact.
+
+The instructions below are not permission to start a session before its
+bootstrap, service-start, observation, and shutdown steps are reviewed.
+
 First confirm that all staging data is disposable. The current RDS settings skip a final snapshot and delete automated backups. Assume that turning the runtime off permanently loses its database data.
 
 Review the removal:

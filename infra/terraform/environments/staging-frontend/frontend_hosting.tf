@@ -48,11 +48,27 @@ resource "aws_cloudfront_distribution" "frontend" {
   comment             = "SecureCloudOps ${var.environment} static frontend"
   default_root_object = "index.html"
   price_class         = "PriceClass_100"
+  wait_for_deployment = true
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
     origin_id                = "frontend-s3"
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+  }
+
+  dynamic "origin" {
+    for_each = var.staging_api_connection_mode == "attached" ? [1] : []
+
+    content {
+      domain_name = var.staging_api_alb_dns_name
+      origin_id   = "api-private-alb"
+
+      vpc_origin_config {
+        vpc_origin_id            = aws_cloudfront_vpc_origin.api[0].id
+        origin_read_timeout      = 60
+        origin_keepalive_timeout = 5
+      }
+    }
   }
 
   default_cache_behavior {
@@ -64,6 +80,36 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     # AWS-managed CachingOptimized policy.
     cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = var.staging_api_connection_mode == "attached" ? [1] : []
+
+    content {
+      path_pattern           = "/api/*"
+      target_origin_id       = "api-private-alb"
+      viewer_protocol_policy = "https-only"
+      allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods         = ["GET", "HEAD"]
+      compress               = true
+
+      # AWS-managed CachingDisabled: do not cache authenticated API responses.
+      cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+
+      # Forward authorization, workspace headers, cookies, and query strings.
+      origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    }
+  }
+
+  dynamic "custom_error_response" {
+    for_each = var.staging_api_connection_mode == "attached" ? toset([
+      400, 403, 404, 405, 414, 500, 501, 502, 503, 504,
+    ]) : toset([])
+
+    content {
+      error_code            = custom_error_response.value
+      error_caching_min_ttl = 0
+    }
   }
 
   restrictions {
