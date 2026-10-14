@@ -23,6 +23,11 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 
+# uv installs dependencies; pip and its bootstrap archive are unnecessary at runtime.
+RUN /usr/local/bin/python -m pip uninstall --yes pip \
+    && test -f /usr/local/lib/python3.14/ensurepip/_bundled/pip-26.2.1-py3-none-any.whl \
+    && rm -- /usr/local/lib/python3.14/ensurepip/_bundled/pip-26.2.1-py3-none-any.whl
+
 # Copy only application source after dependencies are installed.
 COPY --chown=app:app app ./app
 COPY --chown=app:app alembic.ini ./alembic.ini
