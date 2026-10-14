@@ -120,6 +120,7 @@ jobs:
           terraform -chdir=infra/terraform/environments/development init -backend=false -input=false
           terraform -chdir=infra/terraform/environments/staging init -backend=false -input=false
           terraform -chdir=infra/terraform/environments/staging-frontend init -backend=false -input=false
+          terraform -chdir=infra/terraform/environments/github-delivery init -backend=false -input=false -lockfile=readonly
 
       - name: Check Terraform formatting
         run: terraform -chdir=infra/terraform fmt -check -recursive
@@ -130,3 +131,4 @@ jobs:
           terraform -chdir=infra/terraform/environments/development validate -no-color
           terraform -chdir=infra/terraform/environments/staging validate -no-color
           terraform -chdir=infra/terraform/environments/staging-frontend validate -no-color
+          terraform -chdir=infra/terraform/environments/github-delivery validate -no-color
