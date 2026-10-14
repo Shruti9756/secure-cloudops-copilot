@@ -1,0 +1,10 @@
+# Reviewed false positives: Git commit hashes used as API image tags.
+57ef9f519a4d6e95dcd7da758169203904ed83eb:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
+d6eff7c18c8fea470b85ae67cb4c65b1e38a43fb:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
+ad4ef1a7d3fdbcd46414a2cb50bc4fd3ba84ff92:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
+9c5499bcc4ad2e122c5fab8a5c2d0cca5c6b7488:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
+
+# Reviewed false positives: synthetic AWS-key fixtures testing secret redaction.
+b2d6a9c68bca2a5ecfbbec94c6f4ea987d7e6c40:services/api/tests/test_ingestion.py:aws-access-token:48
+b2d6a9c68bca2a5ecfbbec94c6f4ea987d7e6c40:services/api/tests/test_ingestion.py:aws-access-token:63
+b2d6a9c68bca2a5ecfbbec94c6f4ea987d7e6c40:services/api/tests/test_redaction.py:aws-access-token:8
