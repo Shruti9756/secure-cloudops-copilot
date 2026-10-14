@@ -264,15 +264,20 @@ jobs:
             --exit-code 1 \
             --timeout 10m \
             --cache-dir "$RUNNER_TEMP/trivy-cache" \
-            --format table \
-            --output "$RUNNER_TEMP/api-image-vulnerabilities.txt" \
+            --list-all-pkgs \
+            --format json \
+            --output "$RUNNER_TEMP/api-image-vulnerabilities.json" \
             "$API_IMAGE" 2>&1 | tee "$RUNNER_TEMP/api-image-scan.log"
 
       - name: Show the vulnerability report even when the scan fails
         if: always()
         run: |
           set -euo pipefail
-          if [ -f "$RUNNER_TEMP/api-image-vulnerabilities.txt" ]; then
+          if [ -f "$RUNNER_TEMP/api-image-vulnerabilities.json" ]; then
+            trivy convert \
+              --format table \
+              --output "$RUNNER_TEMP/api-image-vulnerabilities.txt" \
+              "$RUNNER_TEMP/api-image-vulnerabilities.json"
             cat "$RUNNER_TEMP/api-image-vulnerabilities.txt"
           else
             echo "No vulnerability report was produced. Check the build/install/scan logs."
@@ -284,6 +289,7 @@ jobs:
         with:
           name: api-image-security-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            ${{ runner.temp }}/api-image-vulnerabilities.json
             ${{ runner.temp }}/api-image-vulnerabilities.txt
             ${{ runner.temp }}/api-image-scan.log
           retention-days: 7

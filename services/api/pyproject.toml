@@ -11,7 +11,7 @@ dependencies = [
     "prometheus-client>=0.26.0",
     "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.14.2",
-    "pyjwt[crypto]>=2.13.0",
+    "pyjwt[crypto]>=2.14.0",
     "pymupdf>=1.28.2",
     "python-docx>=1.2.0",
     "redis>=8.1.0",
@@ -44,3 +44,6 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["I"]
+
+[tool.uv]
+constraint-dependencies = ["urllib3>=2.8.0"]
