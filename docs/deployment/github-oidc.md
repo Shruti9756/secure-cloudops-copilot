@@ -27,8 +27,18 @@ Do not replace it with the older name-only format or a wildcard.
 Do not attach deployment, secret-reading, Terraform-state, or image-pushing
 permissions to this smoke-test role.
 
-A later manually triggered workflow will test temporary authentication using
-`aws sts get-caller-identity`. That workflow is not implemented in this batch.
+The `AWS OIDC identity smoke test` job in `.github/workflows/ci.yml` runs
+only for a manual `workflow_dispatch` on `codex/v04-aws-platform`.
+
+It requests 15-minute credentials and verifies the exact AWS account,
+assumed role, and run-specific session using `aws sts get-caller-identity`.
+It does not build, push, deploy, read secrets, or change AWS resources.
+
+Push and pull-request runs skip this AWS job. The other CI quality jobs
+still run normally.
+
+The workflow definition alone is not proof of successful authentication.
+Record a successful manual run and its PASS message as test evidence.
 
 Do not add long-lived AWS access keys to GitHub secrets.
 Do not add OIDC token permissions to ordinary pull-request CI jobs.

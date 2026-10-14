@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Each job receives only permission to read repository contents.
+# Default permissions; the manual AWS smoke job adds OIDC token permission.
 permissions:
   contents: read
 
@@ -132,3 +132,77 @@ jobs:
           terraform -chdir=infra/terraform/environments/staging validate -no-color
           terraform -chdir=infra/terraform/environments/staging-frontend validate -no-color
           terraform -chdir=infra/terraform/environments/github-delivery validate -no-color
+
+  aws-oidc-smoke:
+    name: AWS OIDC identity smoke test
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'Shruti9756/secure-cloudops-copilot' &&
+      github.ref == 'refs/heads/codex/v04-aws-platform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      EXPECTED_AWS_ACCOUNT_ID: "291667884598"
+      EXPECTED_AWS_ROLE_SESSION_NAME: GitHubOIDCSmoke-${{ github.run_id }}-${{ github.run_attempt }}
+      AWS_PAGER: ""
+
+    steps:
+      - name: Obtain temporary AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          role-to-assume: arn:aws:iam::291667884598:role/secure-cloudops-github-oidc-smoke
+          role-session-name: ${{ env.EXPECTED_AWS_ROLE_SESSION_NAME }}
+          role-duration-seconds: 900
+          allowed-account-ids: "291667884598"
+          unset-current-credentials: true
+          translate-env-variables: false
+          output-credentials: false
+          output-env-credentials: true
+          action-timeout-s: 120
+          retry-max-attempts: 3
+
+      - name: Verify the temporary AWS identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          identity = json.loads(
+              subprocess.check_output(
+                  [
+                      "aws",
+                      "sts",
+                      "get-caller-identity",
+                      "--region",
+                      "us-east-1",
+                      "--output",
+                      "json",
+                  ],
+                  text=True,
+              )
+          )
+          expected_account = os.environ["EXPECTED_AWS_ACCOUNT_ID"]
+          expected_session = os.environ["EXPECTED_AWS_ROLE_SESSION_NAME"]
+          expected_arn = (
+              f"arn:aws:sts::{expected_account}:assumed-role/"
+              f"secure-cloudops-github-oidc-smoke/{expected_session}"
+          )
+
+          if identity.get("Account") != expected_account:
+              raise SystemExit("FAIL: unexpected AWS account.")
+          if identity.get("Arn") != expected_arn:
+              raise SystemExit("FAIL: unexpected AWS role or session.")
+
+          print(f"AWS account: {identity['Account']}")
+          print(f"Assumed role: {identity['Arn']}")
+          print("PASS: GitHub OIDC temporary AWS authentication verified.")
+          PY
