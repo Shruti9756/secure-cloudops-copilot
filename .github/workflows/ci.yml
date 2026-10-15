@@ -4,8 +4,14 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_api_image:
+        description: "Publish the scanned API image to ECR (does not deploy)"
+        required: true
+        type: boolean
+        default: false
 
-# Default permissions; the manual AWS smoke job adds OIDC token permission.
+# Only the manual AWS identity and publishing jobs request OIDC permission.
 permissions:
   contents: read
 
@@ -214,6 +220,9 @@ jobs:
       github.repository == 'Shruti9756/secure-cloudops-copilot' &&
       github.ref == 'refs/heads/codex/v04-aws-platform'
     needs: [api-quality, secret-scan]
+    outputs:
+      image_archive_sha256: ${{ steps.export-image.outputs.sha256 }}
+      image_artifact_id: ${{ steps.upload-image.outputs.artifact-id }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
 
@@ -294,3 +303,132 @@ jobs:
             ${{ runner.temp }}/api-image-scan.log
           retention-days: 7
           if-no-files-found: warn
+
+      - name: Export the scanned image only when publication is requested
+        if: ${{ success() && inputs.publish_api_image }}
+        id: export-image
+        run: |
+          set -euo pipefail
+          docker save --output "$RUNNER_TEMP/api-image.tar" "$API_IMAGE"
+          archive_sha256="$(sha256sum "$RUNNER_TEMP/api-image.tar" | cut -d ' ' -f 1)"
+          printf 'sha256=%s\n' "$archive_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Transfer the scanned image to the publisher job
+        if: ${{ success() && inputs.publish_api_image }}
+        id: upload-image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: api-image-for-publish-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/api-image.tar
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  api-image-publish:
+    name: Publish scanned API image to ECR
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'Shruti9756/secure-cloudops-copilot' &&
+      github.ref == 'refs/heads/codex/v04-aws-platform' &&
+      inputs.publish_api_image
+    needs: [api-image-security, web-quality, terraform-quality, aws-oidc-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: api-image-publish-${{ github.sha }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      API_IMAGE: secure-cloudops-api:${{ github.sha }}
+      ECR_REGISTRY: 291667884598.dkr.ecr.us-east-1.amazonaws.com
+      ECR_REPOSITORY: secure-cloudops-staging/api
+      EXPECTED_AWS_ACCOUNT_ID: "291667884598"
+      EXPECTED_AWS_ROLE_SESSION_NAME: GitHubAPIPublish-${{ github.run_id }}-${{ github.run_attempt }}
+      EXPECTED_ARCHIVE_SHA256: ${{ needs.api-image-security.outputs.image_archive_sha256 }}
+      AWS_REGION: us-east-1
+      AWS_PAGER: ""
+      DOCKER_CONFIG: ${{ runner.temp }}/docker-ecr
+
+    steps:
+      - name: Download this run's scanned image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.api-image-security.outputs.image_artifact_id }}
+          path: ${{ runner.temp }}/scanned-api-image
+          digest-mismatch: error
+
+      - name: Verify the archive and load it without rebuilding
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          archive="$RUNNER_TEMP/scanned-api-image/api-image.tar"
+          printf '%s  %s\n' "$EXPECTED_ARCHIVE_SHA256" "$archive" | sha256sum --check -
+          docker load --input "$archive"
+          platform="$(docker image inspect "$API_IMAGE" --format '{{.Os}}/{{.Architecture}}')"
+          test "$platform" = "linux/amd64"
+          echo "PASS: verified and loaded the scanned linux/amd64 image."
+
+      - name: Obtain temporary publisher credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+          role-to-assume: arn:aws:iam::291667884598:role/secure-cloudops-github-api-image-publisher
+          role-session-name: ${{ env.EXPECTED_AWS_ROLE_SESSION_NAME }}
+          role-duration-seconds: 900
+          allowed-account-ids: "291667884598"
+          unset-current-credentials: true
+          translate-env-variables: false
+          output-credentials: false
+          output-env-credentials: true
+          action-timeout-s: 120
+          retry-max-attempts: 3
+
+      - name: Verify the publisher identity
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          arn="$(aws sts get-caller-identity --query Arn --output text)"
+          expected_arn="arn:aws:sts::${EXPECTED_AWS_ACCOUNT_ID}:assumed-role/secure-cloudops-github-api-image-publisher/${EXPECTED_AWS_ROLE_SESSION_NAME}"
+          test "$account" = "$EXPECTED_AWS_ACCOUNT_ID"
+          test "$arn" = "$expected_arn"
+          printf 'PASS: publisher identity verified: %s\n' "$arn"
+
+      - name: Push the scanned image and verify its ECR digest
+        run: |
+          set -euo pipefail
+          image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+          trap 'docker logout "$ECR_REGISTRY" >/dev/null 2>&1 || true' EXIT
+
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+          docker tag "$API_IMAGE" "$image_uri"
+          docker push "$image_uri" 2>&1 | tee "$RUNNER_TEMP/api-image-push.log"
+
+          push_digest="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}) size:.*$/\1/p' "$RUNNER_TEMP/api-image-push.log" | tail -n 1)"
+          [[ "$push_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          ecr_digest="$(aws ecr describe-images \
+            --registry-id "$EXPECTED_AWS_ACCOUNT_ID" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$GITHUB_SHA" \
+            --region "$AWS_REGION" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          test "$ecr_digest" = "$push_digest"
+
+          printf 'PASS: ECR digest verified: %s\n' "$ecr_digest"
+          {
+            echo '### API image publication'
+            printf -- '- Commit: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Image: `%s@%s`\n' "$ECR_REGISTRY/$ECR_REPOSITORY" "$ecr_digest"
+            echo '- Published the scanned image; no application deployment was performed.'
+          } >> "$GITHUB_STEP_SUMMARY"
