@@ -55,8 +55,9 @@ All six jobs passed, including the identity-only AWS OIDC smoke test and
 the API image build and vulnerability scan. Image validation details are
 recorded in [API image-security evidence](api-image-security.md).
 
-This verifies authentication and build/scan checks, not image publication
-or application deployment.
+That earlier run verified authentication and build/scan checks, not image
+publication or application deployment. The later publishing checkpoint is
+recorded below.
 
 ## API image-publisher IAM foundation — applied
 
@@ -80,9 +81,26 @@ uses `ecr:GetAuthorizationToken` on `*`, restricted to `us-east-1`;
 repository operations use the exact API repository ARN. A token permission
 is not permission to push to every repository.
 
-GitHub assumption of this publisher role and actual ECR publication have
-not yet been verified. The successful earlier OIDC smoke job used the
-separate identity-only role; it is not publisher-role test evidence.
+GitHub assumption of this publisher role and actual API image publication
+were verified on 16 October 2026 (Asia/Kolkata) by manual
+[CI run 38788426230](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230),
+commit `998e4bfb58dd9c3f6463d4de7ae61b4db8a25235`. All seven jobs passed.
+The separate [publisher job](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230/job/116607014135)
+successfully checked the transferred image archive, obtained publisher-role
+credentials, verified the exact AWS account/role session, pushed the image,
+and compared its push digest with ECR. The earlier identity-only smoke
+job remains a separate check, not the evidence for publisher permissions.
+
+The read-only ECR lookup confirmed the matching commit tag and manifest
+digest `sha256:137956eac847118421725ce246b46bcb5466c90a899e3eb4682a15ac78923d20`.
+The complete image reference, push timestamp, and remaining validation
+boundaries are recorded in
+[API publication evidence](api-image-security.md#api-image-publication--verified-16-october-2026).
+
+The `publish_api_image` manual input defaults to `false`. Its publishing
+job has OIDC permission; the build/scan job does not. Publication uses the
+exact scanned archive rather than a rebuild. No ECS deployment, database
+migration, service start, or runtime-on apply is performed by this path.
 
 Review the `github-delivery` plan before applying any new IAM resources.
 Defining or creating a publisher role alone does not publish an image,

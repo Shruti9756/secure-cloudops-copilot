@@ -327,7 +327,8 @@
 
 - [x] Authenticate GitHub Actions to AWS using OIDC; never store long-lived AWS keys in GitHub. Verified by the identity-only smoke job; this does not grant publishing or deployment permissions.
 - [x] Build and scan the API runtime image in a manual GitHub Actions run. Alpine native/startup checks and all 615 offline API tests passed locally; all six CI jobs passed on commit `0e4bf19`. Evidence: `docs/deployment/api-image-security.md`.
-- [x] Provision a separate repository-scoped GitHub OIDC API image-publisher role. Terraform applied two IAM resources and the follow-up plan reported no changes; publisher-role authentication and image publication remain to be verified.
+- [x] Provision a separate repository-scoped GitHub OIDC API image-publisher role. Terraform applied two IAM resources and the follow-up plan reported no changes; the separate publisher role was subsequently authenticated successfully in manual CI.
+- [x] Publish the exact scanned API image to ECR through an opt-in manual run. All seven jobs passed in [run 38788426230](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230) on commit `998e4bf`; a read-only ECR lookup confirmed the immutable commit tag and registry digest on 16 October 2026. Evidence: `docs/deployment/api-image-security.md`. This is image publication, not application deployment.
 - [ ] Build, scan, push, and deploy images from GitHub Actions.
 - [ ] Run controlled database migrations.
 - [ ] Add a staging smoke test and rollback instructions.

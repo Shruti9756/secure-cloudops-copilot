@@ -1,6 +1,8 @@
-# API image-security checkpoint
+# API image security and publication checkpoints
 
-Verified on 15 October 2026 for the V0.4 AWS-platform branch.
+Initial runtime validation was verified on 15 October 2026 for the V0.4
+AWS-platform branch. API image publication was verified on 16 October 2026
+(Asia/Kolkata).
 
 ## Successful CI evidence
 
@@ -12,8 +14,9 @@ Verified on 15 October 2026 for the V0.4 AWS-platform branch.
 
 The image-security job runs only for a manual workflow dispatch on the
 specified repository and branch. Ordinary push and pull-request runs do
-not establish image-security success. After changing source, start a new
-manual run for the new commit; rerunning an old run uses its original commit.
+not establish image-security success. After changing image build inputs,
+start a new manual run for the new commit; rerunning an old run uses its
+original commit.
 
 ## Runtime changes and rationale
 
@@ -60,19 +63,68 @@ severities were scanned or that future scans will remain clear.
 - Save JSON, text, and diagnostic-log artifacts even when scanning fails. Current artifact retention is seven days.
 - Do not add long-lived AWS keys or publish/deploy from pull-request CI.
 
+## API image publication — verified 16 October 2026
+
+The opt-in manual [CI run 38788426230](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230)
+completed successfully on commit `998e4bfb58dd9c3f6463d4de7ae61b4db8a25235`,
+on branch `codex/v04-aws-platform`. All seven jobs passed, including
+`Publish scanned API image to ECR`; publication was not skipped.
+
+The build/scan job retains only `contents: read` permission. After the
+vulnerability gate passed, it exported the scanned image and transferred
+it as a one-day artifact. The separate publisher downloaded that exact
+artifact ID, checked its SHA-256 checksum, loaded the expected
+`linux/amd64` image without rebuilding, and obtained temporary credentials
+through the dedicated publisher role. Its identity check and
+[push-and-ECR-digest verification step](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230/job/116607014135)
+both passed.
+
+The operator's read-only `aws ecr describe-images` result confirmed:
+
+- Registry account and region: `291667884598`, `us-east-1`.
+- Repository: `secure-cloudops-staging/api`.
+- Immutable commit tag: `998e4bfb58dd9c3f6463d4de7ae61b4db8a25235`.
+- Registry manifest digest: `sha256:137956eac847118421725ce246b46bcb5466c90a899e3eb4682a15ac78923d20`.
+- Push timestamp: `2026-10-16T00:18:35.301000+05:30`.
+
+The exact published image reference is:
+
+```text
+291667884598.dkr.ecr.us-east-1.amazonaws.com/secure-cloudops-staging/api@sha256:137956eac847118421725ce246b46bcb5466c90a899e3eb4682a15ac78923d20
+```
+
+This registry digest identifies the published manifest; it is not the
+Docker archive checksum or the GitHub artifact digest. Staging's task
+configuration currently selects its shared API image by commit tag, not
+by a digest reference. Selecting the newly verified tag and reviewing a
+runtime-off plan is a separate configuration handoff, not a deployment.
+
+`publish_api_image` defaults to `false`. Publication requires an explicit
+manual selection on the approved repository and branch, and all required
+quality/security jobs must succeed. Docker's temporary login directory is
+set in the publishing step's environment, where GitHub permits
+`runner.temp`; placing it in job-level `env` causes workflow startup
+validation to fail.
+
+Keep ECR tag immutability enabled. A different rebuilt image must not
+overwrite an existing commit tag. Immutability does not guarantee permanent
+retention: the repository lifecycle policy keeps only the newest ten
+images, so confirm the selected image still exists before a future session.
+
 ## What remains unverified
 
-This checkpoint does not prove AWS image publication, ECS deployment,
-RDS/Valkey connectivity, controlled cloud migrations, Bedrock access, or
-browser-to-answer staging behavior. Keep the on-demand staging runtime
-off until those separate gates are reviewed.
+Publication does not prove ECS can pull or start the image, RDS/Valkey
+connectivity, controlled cloud migrations, SQS ingestion, Bedrock access,
+browser-to-answer staging behavior, rollback, or session shutdown. No
+application deployment was performed by this workflow. Keep the on-demand
+staging runtime off until those separate gates are reviewed.
 
-Future publishing must publish the exact image that passed the scan. A
+Every publication must use the exact image that passed its scan. A
 rebuild after a scan is a new artifact and requires its own validation.
 
-The separate least-privileged publisher role has now been provisioned with
-a clean follow-up Terraform plan, as recorded in the
+The separate least-privileged publisher role was provisioned with a clean
+follow-up Terraform plan, as recorded in the
 [OIDC foundation](github-oidc.md#api-image-publisher-iam-foundation--applied).
-GitHub assumption of that role and actual image publication are still
-pending. The existing identity-only smoke role must not acquire publishing
-or deployment rights.
+Its GitHub authentication and API image publication are now verified by
+the later run above. The existing identity-only smoke role must not acquire
+publishing or deployment rights.
