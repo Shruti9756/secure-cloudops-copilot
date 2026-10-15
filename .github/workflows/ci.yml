@@ -355,7 +355,6 @@ jobs:
       EXPECTED_ARCHIVE_SHA256: ${{ needs.api-image-security.outputs.image_archive_sha256 }}
       AWS_REGION: us-east-1
       AWS_PAGER: ""
-      DOCKER_CONFIG: ${{ runner.temp }}/docker-ecr
 
     steps:
       - name: Download this run's scanned image
@@ -403,6 +402,8 @@ jobs:
           printf 'PASS: publisher identity verified: %s\n' "$arn"
 
       - name: Push the scanned image and verify its ECR digest
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/docker-ecr
         run: |
           set -euo pipefail
           image_uri="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
