@@ -325,7 +325,9 @@
 
 ## Deployment pipeline
 
-- [ ] Authenticate GitHub Actions to AWS using OIDC; never store long-lived AWS keys in GitHub.
+- [x] Authenticate GitHub Actions to AWS using OIDC; never store long-lived AWS keys in GitHub. Verified by the identity-only smoke job; this does not grant publishing or deployment permissions.
+- [x] Build and scan the API runtime image in a manual GitHub Actions run. Alpine native/startup checks and all 615 offline API tests passed locally; all six CI jobs passed on commit `0e4bf19`. Evidence: `docs/deployment/api-image-security.md`.
+- [x] Provision a separate repository-scoped GitHub OIDC API image-publisher role. Terraform applied two IAM resources and the follow-up plan reported no changes; publisher-role authentication and image publication remain to be verified.
 - [ ] Build, scan, push, and deploy images from GitHub Actions.
 - [ ] Run controlled database migrations.
 - [ ] Add a staging smoke test and rollback instructions.
