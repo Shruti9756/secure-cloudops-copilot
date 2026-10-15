@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.14-slim
+FROM python:3.14.8-alpine3.24
 
-# Copy a pinned uv binary into the image.
 COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -13,22 +12,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Do not run the API as root.
-RUN addgroup --system app && adduser --system --ingroup app app
+# Install current stable Alpine updates and the C++ runtime.
+# No compiler toolchain or glibc compatibility layer is installed.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache libstdc++ \
+    && addgroup -S app \
+    && adduser -S -D -H -G app app
 
-# Copy dependency files first so Docker can cache dependency installation.
 COPY pyproject.toml uv.lock ./
 
-# Install only locked production dependencies, excluding test and lint tools.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-install-project
+# Keep locked dependencies and require compatible prebuilt wheels.
+# Do not download a different Python or compile dependencies from source.
+RUN uv sync \
+    --locked \
+    --no-dev \
+    --no-install-project \
+    --python /usr/local/bin/python \
+    --no-python-downloads \
+    --no-build \
+    --no-cache
 
-# uv installs dependencies; pip and its bootstrap archive are unnecessary at runtime.
+# uv installs dependencies; pip and its bootstrap archive are unnecessary.
 RUN /usr/local/bin/python -m pip uninstall --yes pip \
     && test -f /usr/local/lib/python3.14/ensurepip/_bundled/pip-26.2.1-py3-none-any.whl \
     && rm -- /usr/local/lib/python3.14/ensurepip/_bundled/pip-26.2.1-py3-none-any.whl
 
-# Copy only application source after dependencies are installed.
 COPY --chown=app:app app ./app
 COPY --chown=app:app alembic.ini ./alembic.ini
 COPY --chown=app:app migrations ./migrations
