@@ -8,12 +8,14 @@ The static website is managed separately by `infra/terraform/environments/stagin
 
 ## Readiness gate for a full staging test
 
-Keep `runtime_enabled=false` until there is a specific test session and a reviewed way to start, observe, and stop every billable runtime component. A Terraform task definition is only a container recipe; both the API and worker services have `desired_count = 0`, so enabling the runtime alone will not start either container.
+Keep `runtime_enabled=false` until there is a specific test session and a reviewed way to start, observe, and stop every billable runtime component. The [controlled-session runbook](staging-session-runbook.md) records the current holds, exact service names, start/verification order, and failure/shutdown criteria. It is prepared documentation, not live-tested deployment evidence or approval to start a session.
+
+A Terraform task definition is only a container recipe. API, worker, and the optional SQS outbox publisher all have `desired_count = 0`; enabling the runtime alone starts none of them. The publisher is created only when runtime is enabled and queue mode is `sqs`.
 
 Before a full browser-to-answer test, review these dependencies in order:
 
 1. **Website:** Confirm that the separate frontend state contains a successfully created CloudFront distribution and its private-bucket read policy. Build the static export with staging browser settings, publish it, and confirm its HTTPS URL and `auth/callback.html` route. A bucket and origin access control alone do not make the website available.
-2. **API entry:** Provide a reviewed HTTPS entry point for the API. The API security group allows requests from the load-balancer security group, but this configuration does not yet create an Application Load Balancer or a public API URL. Do not rely on the task's public IP as the browser entry point.
+2. **API entry:** The platform now defines a runtime-gated private Application Load Balancer, and the separate frontend root defines a disabled CloudFront VPC-origin connection. Verify the actual active ALB, origin, and HTTPS path during an approved session; definitions alone are not a deployed API. Do not rely on a task's public IP as the browser entry point.
 3. **Identity and browser configuration:** Use a dedicated staging Cognito pool and app client, not the development identifiers. Match its callback/logout URLs, the frontend's build-time `NEXT_PUBLIC_*` values, and the API's allowed browser origin to the actual staging HTTPS addresses.
 4. **AI and ingestion:** Select cloud-usable embedding and chat providers for the API and worker, confirm required model authorization, and make both sides use the same embedding model. The worker task and service are defined but start at zero tasks; review how to start and stop the worker before testing uploads.
 5. **Controlled session:** Review database bootstrap, API and worker start/stop, a smoke test, and the runtime-off plan. Confirm that all staging data is disposable, because switching the runtime off deletes the database and cache.
@@ -26,10 +28,12 @@ These findings describe the current repository configuration, not the status of 
 
 | Gate | Current configuration | What must be verified |
 | --- | --- | --- |
-| Staging sign-in | `infra/terraform/environments/staging/variables.tf` leaves the staging Cognito issuer and app client ID blank. The API task refuses an on-mode plan without them. | A dedicated staging user pool and client use the real staging HTTPS callback/logout URLs; the API and browser use matching values. Do not reuse the development pool. |
-| Browser-to-API connection | There is no staging API HTTPS entry point yet. The API's default `CORS_ALLOWED_ORIGINS` contains only localhost, and `ecs_api_task.tf` does not override it. | The browser has an actual HTTPS API URL, and the API allows the exact staging website origin. A public task IP is not a substitute for the reviewed entry point. |
+| Staging sign-in | The dedicated staging Cognito pool/client were previously deployed and verified. Platform input defaults remain blank, and the API refuses an on-mode plan without real issuer/client values. | Read `staging_identity` from the frontend root; match browser callbacks/logout and API inputs. Separately provision the synthetic tenant/user/membership. Deployed Cognito alone does not prove application access. |
+| Browser-to-API connection | A private runtime-gated ALB and disabled CloudFront API connection are defined. `ecs_api_task.tf` supplies `CORS_ALLOWED_ORIGINS` from `staging_frontend_origin`. | Verify the real frontend origin, healthy ALB `/ready` target, and attached `/api/*` HTTPS routing. A public task IP is not the browser entry point. |
 | Embedding and answers | The API and worker task definitions do not select an embedding provider, so both default to Ollama at `127.0.0.1`. The API chat provider also uses Ollama. No staging Ollama service is defined. | The API and worker use the same reachable embedding model, answer generation uses a reachable chat model, and any required model permissions are confirmed before starting tasks. |
-| Controlled runtime | Both ECS services are defined with `desired_count = 0`; Terraform enabling the runtime registers tasks but starts neither service. | Database bootstrap succeeds first; deliberate API/worker start, observation, stop, and runtime-off steps are reviewed for one short test session. |
+| Application seed/provisioning | Database bootstrap applies migrations and restricted-role grants, not tenants/users/memberships. The image does not package existing `scripts/` or demo-data files. | Review an explicit synthetic-data and identity provisioning mechanism before authenticated/ingestion tests. Do not invent unshipped script entry points. |
+| Private document storage | The application defaults to a disabled document-storage backend; the staging API task supplies no S3 document-store settings. | Review a private staging document bucket, scoped task permissions, and redacted storage/authorized download evidence. The static frontend bucket must not be reused for uploaded documents. |
+| Controlled runtime | API, worker, and optional publisher desired counts are zero, with no lifecycle rule ignoring manual count changes. | Bootstrap first; verify each service/task and functional gate separately. A platform apply can reset a manually started service to zero. Complete the controlled-session review before a short test. |
 
 Do not change these to development URLs or placeholder identifiers merely to make a plan pass. Model access and the browser path remain separate checks even after Terraform validation succeeds.
 
@@ -54,7 +58,7 @@ This creates supporting resources **without** creating the RDS instance or Valke
 terraform -chdir=infra\terraform\environments\staging plan -input=false -var="runtime_enabled=false"
 ```
 
-The last reviewed off-mode plan showed **11 adds, 0 changes, 0 destroys**. The count can change after an apply or code update, so read the resource names rather than treating 11 as a target. The additions include two Secrets Manager secrets, which can have ongoing cost.
+The off-mode plan reviewed for the verified-image handoff on 16 October 2026 showed **25 adds, 1 change, 0 destroys**. These were pending supporting resources, including publisher roles/rules, SQS, and two application secrets; the one update added the publisher rule to database security-group ownership. No RDS instance, Valkey replication group, ECS service/task definition, or ALB creation was proposed. Read names, not a fixed count. Planning does not apply the changes, and an off-mode apply can still create resources with ongoing cost.
 
 Only after deciding to create those resources, run:
 
@@ -66,7 +70,7 @@ Terraform will show a **fresh plan** and ask for approval. Check it again before
 
 ## Start a planned test session
 
-**Hold for now:** Do not run this section until staging Cognito is configured and the separate database-bootstrap, API/worker-start, and session-shutdown steps are documented and reviewed. Turning the runtime on creates RDS and Valkey while the API and worker remain stopped.
+**Hold for now:** Do not run this section until real staging identity/origin inputs and the [controlled-session gates](staging-session-runbook.md) are reviewed for an explicitly approved purpose and cost window. Full ingestion/answer testing additionally needs working providers and an approved synthetic seed/provisioning path. Turning runtime on creates RDS, Valkey, and the private ALB while services remain at zero tasks; charges can begin before the API is started.
 
 First review:
 
@@ -84,11 +88,11 @@ terraform -chdir=infra\terraform\environments\staging apply -var="runtime_enable
 
 Review the fresh plan before typing `yes`. Record when the database and cache are created.
 
-**This does not start the application.** The API and worker services have `desired_count = 0`. Running the one-off database bootstrap task and then starting the API and worker require separate reviewed instructions; do not improvise those steps.
+**This does not start the application.** API, worker, and optional publisher services have `desired_count = 0`. Bootstrap and deliberate service starts are separate phases in the controlled-session runbook. Do not improvise them or treat a zero-task stable service as a successful application start.
 
 ## Database bootstrap — future test session
 
-**Do not run this yet.** First, the reviewed `runtime_enabled=true` apply must create RDS and the bootstrap task definition. The API-start and shutdown procedures must also be reviewed. Terraform registers this one-off task but never runs it automatically.
+**Do not run this yet.** First, the reviewed `runtime_enabled=true` apply must create RDS and the bootstrap task definition. The selected controlled-session purpose, image/platform checks, API-start, and shutdown procedures must also be reviewed. Terraform registers this one-off task but never runs it automatically. The commands below do not themselves enforce every session gate: inspect the registered bootstrap task's approved image, roles, and network before launching, then check the returned task's manifest/platform evidence before accepting success.
 
 The task applies database migrations and creates the restricted `securecloudops_app` database role. Run it in a public staging subnet with a public IP because this VPC has no NAT gateway or VPC endpoints. The database itself remains private. The AWS identity running it needs `ecs:RunTask`, `ecs:DescribeTasks`, and `iam:PassRole` for the bootstrap execution role.
 
@@ -184,7 +188,7 @@ if ($task.lastStatus -ne 'STOPPED' -or $container.Count -ne 1 -or $container[0].
 Write-Host 'PASS: database migrations and restricted application role completed.'
 ```
 
-A task being `STOPPED` only means it finished; **exit code `0`** is what confirms success. If a command throws, stop there—do not continue or launch another task automatically.
+A task being `STOPPED` only means it finished; require the named container's **exit code `0`**, expected image/task/platform evidence, and the bootstrap success log. A failed wait or missing result is not permission to launch another task. Bootstrap does not seed application users/workspaces or prove AI readiness.
 
 ## End a test session
 
@@ -217,6 +221,10 @@ The website and staging Cognito must remain intact.
 
 The instructions below are not permission to start a session before its
 bootstrap, service-start, observation, and shutdown steps are reviewed.
+First stop new requests and explicitly scale each existing selected service
+to zero, verify desired/running/pending counts and tracked tasks, and inspect
+the separate bootstrap task. The controlled-session runbook records this
+order, the optional publisher condition, and uncertain-result handling.
 
 First confirm that all staging data is disposable. The current RDS settings skip a final snapshot and delete automated backups. Assume that turning the runtime off permanently loses its database data.
 
@@ -226,7 +234,7 @@ Review the removal:
 terraform -chdir=infra\terraform\environments\staging plan -input=false -var="runtime_enabled=false"
 ```
 
-With the current design, expect removal of the RDS instance, Valkey replication group, API and worker services and task definitions, database-bootstrap task definition, and the bootstrap and worker secret-read policies. Stop if Terraform also proposes deleting the network, ECR repositories, ECS cluster, or the two persistent application secrets.
+With the current design, expect removal of the RDS instance, Valkey replication group, API/worker and optional publisher services/task definitions, bootstrap task definition, runtime-only secret-read policies, private API ALB/listener/target group, and their runtime security resources. Stop if Terraform also proposes deleting the network, ECR repositories, ECS cluster, persistent roles/application secrets, SQS/DLQ, static frontend, or staging Cognito. Persistent queue messages may outlive the disposable database; review their handling separately and do not purge/replay as an implicit cleanup step.
 
 Only after reviewing and accepting that data loss, run:
 
