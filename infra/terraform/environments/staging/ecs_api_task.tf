@@ -1,5 +1,5 @@
 locals {
-  staging_api_image_tag = "998e4bfb58dd9c3f6463d4de7ae61b4db8a25235"
+  staging_api_image_tag = "ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a" # gitleaks:allow -- verified public Git commit image tag
 }
 
 resource "aws_ecs_task_definition" "api" {

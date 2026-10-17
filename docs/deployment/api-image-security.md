@@ -1,8 +1,9 @@
 # API image security and publication checkpoints
 
 Initial runtime validation was verified on 15 October 2026 for the V0.4
-AWS-platform branch. API image publication was verified on 16 October 2026
-(Asia/Kolkata).
+AWS-platform branch. The first API image publication was verified on
+16 October 2026; the replacement publication below was verified on
+18 October 2026 (Asia/Kolkata). Neither publication is a deployment.
 
 ## Successful CI evidence
 
@@ -63,7 +64,68 @@ severities were scanned or that future scans will remain clear.
 - Save JSON, text, and diagnostic-log artifacts even when scanning fails. Current artifact retention is seven days.
 - Do not add long-lived AWS keys or publish/deploy from pull-request CI.
 
+## Replacement API image publication — verified 18 October 2026
+
+The opt-in manual [CI run 39058503928](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/39058503928)
+completed successfully on branch `codex/v04-aws-platform`, commit
+`ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a`. All seven jobs passed,
+including the API image build/vulnerability scan and `Publish scanned API
+image to ECR`, with successful push/digest verification; publication was
+not skipped.
+The publication source includes the packaged `app.db.staging_identity`
+module present in source ancestor `4a1762b`.
+
+The operator's read-only ECR output confirmed this replacement record:
+
+- Registry account and region: `291667884598`, `us-east-1`.
+- Repository: `secure-cloudops-staging/api`.
+- Immutable commit tag: `ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a`.
+- Registry manifest digest: `sha256:8b02063529e4dc1aa931b18c21bd14b902e55fb73f0cde6dcf09a5e9b7097c37`.
+- Manifest media type: `application/vnd.docker.distribution.manifest.v2+json` (a single image manifest, not a platform index).
+- Reported image size: `144764945` bytes.
+- Push timestamp: `2026-10-18T00:03:56.526000+05:30`.
+
+The exact replacement image reference is:
+
+```text
+291667884598.dkr.ecr.us-east-1.amazonaws.com/secure-cloudops-staging/api@sha256:8b02063529e4dc1aa931b18c21bd14b902e55fb73f0cde6dcf09a5e9b7097c37
+```
+
+This is registry-publication proof, not proof that ECS can pull/start the
+replacement, that its identity module imports inside the runtime, or that
+live database seeding, restricted grants, browser authentication, or any
+application deployment succeeded. The source-selection and runtime-off
+plan review below is a configuration checkpoint only. No runtime
+activation is implied.
+
+### Source-selection review — 18 October 2026
+
+The operator selected the verified replacement tag in the shared
+`staging_api_image_tag` local in `ecs_api_task.tf`. The API, worker,
+publisher, and database-bootstrap task definitions still consume that one
+local; their runtime gates and zero service desired counts were not changed.
+The reviewed public-hash assignment has a same-line `gitleaks:allow` marker.
+That allowance is limited to this line, must never be used for credentials,
+and does not replace the existing historical finding fingerprints.
+
+The operator reported successful Terraform validation and a plan with
+`runtime_enabled=false` and `staging_document_queue_backend="disabled"`:
+**25 to add, 1 to change, 0 to destroy**. The additions were pending
+foundation resources: log/subnet groups, IAM, Secrets Manager, SQS, and
+publisher security-group resources. The in-place change was the database
+security group's exclusive rule set. No RDS instance, Valkey replication
+group, ECS service/task definition, or load balancer was listed.
+
+This plan was not applied. These are operator-reported proposal results,
+not an assertion about applied AWS state or a required count for future
+plans. No new image build/publication is required solely for this
+Terraform/documentation handoff; the approved application image remains
+the verified `ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a` artifact above.
+
 ## API image publication — verified 16 October 2026
+
+This earlier publication is retained as history. The replacement candidate
+is recorded in the 18 October checkpoint above.
 
 The opt-in manual [CI run 38788426230](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230)
 completed successfully on commit `998e4bfb58dd9c3f6463d4de7ae61b4db8a25235`,
@@ -88,17 +150,18 @@ The operator's read-only `aws ecr describe-images` result confirmed:
 - Follow-up manifest media type: `application/vnd.docker.distribution.manifest.v2+json` (a single image manifest, not a platform index).
 - Push timestamp: `2026-10-16T00:18:35.301000+05:30`.
 
-The exact published image reference is:
+The image reference published at this earlier checkpoint was:
 
 ```text
 291667884598.dkr.ecr.us-east-1.amazonaws.com/secure-cloudops-staging/api@sha256:137956eac847118421725ce246b46bcb5466c90a899e3eb4682a15ac78923d20
 ```
 
-This registry digest identifies the published manifest; it is not the
-Docker archive checksum or the GitHub artifact digest. Staging's task
-configuration currently selects its shared API image by commit tag, not
-by a digest reference. Selecting the newly verified tag and reviewing a
-runtime-off plan is a separate configuration handoff, not a deployment.
+This historical registry digest identifies that published manifest; it is
+not the Docker archive checksum or the GitHub artifact digest. Staging's
+shared API image is selected by commit tag, not by a digest reference.
+The replacement selection and plan review are described in the 18 October record
+above; this older publication is retained as history, not presented as the
+newly verified replacement.
 
 `publish_api_image` defaults to `false`. Publication requires an explicit
 manual selection on the approved repository and branch, and all required
@@ -126,6 +189,6 @@ rebuild after a scan is a new artifact and requires its own validation.
 The separate least-privileged publisher role was provisioned with a clean
 follow-up Terraform plan, as recorded in the
 [OIDC foundation](github-oidc.md#api-image-publisher-iam-foundation--applied).
-Its GitHub authentication and API image publication are now verified by
-the later run above. The existing identity-only smoke role must not acquire
+Its GitHub authentication and API image publication are verified by the
+publication runs above. The existing identity-only smoke role must not acquire
 publishing or deployment rights.

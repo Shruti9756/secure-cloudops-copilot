@@ -3,7 +3,8 @@
 Prepared on 16 October 2026 for `codex/v04-aws-platform`.
 
 **Status: static website publication and two HTTPS HTML routes verified on
-17 October 2026. No runtime session is approved by this document, and the
+17 October 2026; replacement API image publication verified on 18 October
+2026. No runtime session is approved by this document, and the
 service-start/shutdown procedures have not been tested on AWS. Do not
 execute the future live phases yet.** Keep
 `runtime_enabled=false`, `staging_document_queue_backend="disabled"`,
@@ -26,14 +27,28 @@ staging data. Never copy this procedure into development or production.
 | Platform Terraform root | `infra/terraform/environments/staging` |
 | Frontend/identity Terraform root | `infra/terraform/environments/staging-frontend` |
 | Image repository | `291667884598.dkr.ecr.us-east-1.amazonaws.com/secure-cloudops-staging/api` |
-| Verified commit tag | `998e4bfb58dd9c3f6463d4de7ae61b4db8a25235` |
-| Verified top-level registry digest | `sha256:137956eac847118421725ce246b46bcb5466c90a899e3eb4682a15ac78923d20` |
+| Configured commit tag (not deployed) | `ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a` |
+| Verified top-level registry digest | `sha256:8b02063529e4dc1aa931b18c21bd14b902e55fb73f0cde6dcf09a5e9b7097c37` |
+| Verified manifest media type | `application/vnd.docker.distribution.manifest.v2+json` (single image manifest) |
 
-[Publication evidence](api-image-security.md#api-image-publication--verified-16-october-2026)
+[Publication evidence](api-image-security.md#replacement-api-image-publication--verified-18-october-2026)
 records the successful CI run and operator's ECR lookup. The API, worker,
 database bootstrap, and outbox publisher share `local.staging_api_image_tag`
 in `ecs_api_task.tf`. A later documentation or Terraform-only commit does
 not require rebuilding an unchanged image.
+
+On 18 October, the operator selected this shared tag in the local Terraform
+source and reported successful validation. The explicit runtime-off,
+queue-disabled plan showed **25 to add, 1 to change, 0 to destroy**. Its
+changes were pending foundation resources and the database security group's
+exclusive rule set, not RDS/Valkey instances, ECS services/task definitions,
+or a load balancer. Counts describe this unapplied proposal, not resources
+created or a mandatory count for future plans. No apply was performed.
+
+This source-selection checkpoint does not deploy any service. The
+replacement image's presence in ECR is not evidence that ECS pulled it or
+that the staging identity seed was imported or executed inside it. Keep
+all live-phase holds below in force.
 
 Before a live session, re-confirm that the tag still exists and maps to
 that digest; repository lifecycle rules can expire immutable images.
@@ -78,10 +93,14 @@ account plan or buy extra capacity as an access workaround.
   `scripts/` or `docs/demo-data/`; do not invent ECS commands such as
   `python -m scripts.bootstrap_cognito_identity`. A separately reviewed
   synthetic seeding/provisioning path is required for authenticated tests.
-  The [manual identity-seed implementation guide](staging-identity-seed-implementation.md)
-  supplies a proposed module and offline tests. Its documentation-only QA
-  does not clear this live hold; the source must be added by the operator,
-  tested, packaged in a newly scanned image, and reviewed for execution.
+  The operator has now added `app.db.staging_identity` and reported 60
+  targeted tests and 675 total unit tests passing, with six E2E tests
+  deselected. The 18 October image was built and scanned from a commit
+  containing that module. These offline/publication checks do not clear
+  the live hold: module import in the published runtime, PostgreSQL grants,
+  verified Cognito-sub mapping, and a separately reviewed restricted-role
+  execution path remain unverified. Never reuse the administrator bootstrap
+  task with a command override to run this seed.
 - **Browser integration (static HTML verified):** The dedicated staging
   Cognito/frontend outputs match the local API identity/origin inputs, and
   the reviewed export is published with home/callback HTTP 200 HTML checks
@@ -116,7 +135,7 @@ read-only/preflight commands, checking each exit code before continuing:
 ```powershell
 aws sts get-caller-identity --profile securecloudops-dev --query Account --output text
 aws freetier get-account-plan-state --region us-east-1 --profile securecloudops-dev --output json
-aws ecr describe-images --registry-id 291667884598 --repository-name secure-cloudops-staging/api --image-ids imageTag=998e4bfb58dd9c3f6463d4de7ae61b4db8a25235 --region us-east-1 --profile securecloudops-dev --query 'imageDetails[0].{Digest:imageDigest,MediaType:imageManifestMediaType,Tags:imageTags}' --output json
+aws ecr describe-images --registry-id 291667884598 --repository-name secure-cloudops-staging/api --image-ids imageTag=ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a --region us-east-1 --profile securecloudops-dev --query 'imageDetails[0].{Digest:imageDigest,MediaType:imageManifestMediaType,Tags:imageTags}' --output json
 terraform -chdir=infra\terraform\environments\staging-frontend output -json frontend_hosting
 terraform -chdir=infra\terraform\environments\staging-frontend output -json staging_identity
 terraform -chdir=infra\terraform\environments\staging validate
