@@ -1,4 +1,5 @@
 # Reviewed false positives: Git commit hashes used as API image tags.
+a16f79a4621d4c544766f933f6f33f959effde74:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
 57ef9f519a4d6e95dcd7da758169203904ed83eb:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
 d6eff7c18c8fea470b85ae67cb4c65b1e38a43fb:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
 ad4ef1a7d3fdbcd46414a2cb50bc4fd3ba84ff92:infra/terraform/environments/staging/ecs_api_task.tf:generic-api-key:2
