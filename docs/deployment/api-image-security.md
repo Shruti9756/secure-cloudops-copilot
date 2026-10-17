@@ -85,6 +85,7 @@ The operator's read-only `aws ecr describe-images` result confirmed:
 - Repository: `secure-cloudops-staging/api`.
 - Immutable commit tag: `998e4bfb58dd9c3f6463d4de7ae61b4db8a25235`.
 - Registry manifest digest: `sha256:137956eac847118421725ce246b46bcb5466c90a899e3eb4682a15ac78923d20`.
+- Follow-up manifest media type: `application/vnd.docker.distribution.manifest.v2+json` (a single image manifest, not a platform index).
 - Push timestamp: `2026-10-16T00:18:35.301000+05:30`.
 
 The exact published image reference is:

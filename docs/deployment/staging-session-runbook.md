@@ -48,7 +48,7 @@ a hold, not permission to accept an arbitrary different digest or rebuild.
 
 | Session | Permitted objective | Still prohibited |
 | --- | --- | --- |
-| Planning/preflight (current) | Read configuration, validate, inspect identity/image metadata, and review plans | Apply, create runtime resources, scale services up, attach the API origin, upload test data |
+| Planning/preflight (current) | Read configuration, validate, inspect identity/image metadata, review plans, and build the static frontend locally | Apply, create runtime resources, scale services up, attach the API origin, upload test data |
 | Future non-AI connectivity test | Bootstrap the private database; run only the API; verify ALB readiness and approved HTTPS status route | Worker/publisher start, uploads, embedding, chat, and claiming full V0.4 success |
 | Future full staging test | Approved identity/workspace setup, API, SQS worker/publisher, synthetic ingestion, and cited answers | Unreviewed providers, development identities, real documents, unbounded retries |
 
@@ -76,11 +76,13 @@ account plan or buy extra capacity as an access workaround.
   `scripts/` or `docs/demo-data/`; do not invent ECS commands such as
   `python -m scripts.bootstrap_cognito_identity`. A separately reviewed
   synthetic seeding/provisioning path is required for authenticated tests.
-- **Browser configuration:** Resolve the dedicated staging Cognito and
-  frontend outputs, real callback/logout addresses, frontend build-time
-  settings, and API `staging_frontend_origin`. Source defaults being blank
-  does not mean a staging pool is absent, and deployed Cognito resources
-  do not prove browser sign-in or application membership works.
+- **Browser integration (partially prepared):** The dedicated staging
+  Cognito/frontend outputs match the local API identity/origin inputs, and
+  the local staging frontend export passed the checks recorded in section 4.
+  Publishing that export and verifying browser sign-in/application membership
+  remain separate steps. Source defaults being blank does not mean a staging
+  pool is absent; deployed Cognito resources and a local build do not prove
+  a working authenticated application.
 - **Private document storage:** `document_storage_backend` defaults to
   `disabled`, and the staging API task does not configure its S3 backend
   or document bucket. A basic upload test is not proof of the V0.4 S3
@@ -123,6 +125,67 @@ Those were unapplied supporting resources, not running database/cache,
 ECS services/task definitions, or an ALB. Counts are historical evidence,
 not a target or permission to apply. An off-mode apply can still create
 Secrets Manager secrets and other persistent resources with ongoing cost.
+
+### Preflight handoff verified on 16 October 2026
+
+The operator's ECR lookup returned the approved tag/digest above with media
+type `application/vnd.docker.distribution.manifest.v2+json`: a single image
+manifest, not an index. No child-platform digest resolution is needed for
+this object. This is registry metadata evidence, not proof of an ECS pull
+or the platform of a running task.
+
+The frontend/identity outputs returned these public configuration values:
+
+| Setting | Verified value |
+| --- | --- |
+| Frontend bucket | `secure-cloudops-staging-web-291667884598-us-east-1` |
+| CloudFront distribution | `E2JZ8IOOSQ6MB9` |
+| Website origin / frontend API base URL | `https://d28yij2tl8eb0p.cloudfront.net` |
+| Cognito issuer (API setting) | `https://cognito-idp.us-east-1.amazonaws.com/us-east-1_cgRH4viJI` |
+| Public Cognito app client ID | `4snku1lu0f41r0u5datrlsovuj` |
+| Browser managed-login base URL | `https://secure-cloudops-copilot-staging-291667884598.auth.us-east-1.amazoncognito.com` |
+| Browser callback URL | `https://d28yij2tl8eb0p.cloudfront.net/auth/callback.html` |
+| Browser logout URL | `https://d28yij2tl8eb0p.cloudfront.net/` |
+
+The existing ignored platform `terraform.tfvars` already matches the
+issuer, app client ID, and website origin, with runtime off and queue mode
+disabled; do not append duplicate assignments. The frontend API base is
+the origin alone: browser code adds `/api/v1/...` itself. Browser login
+uses the managed-login URL, not the API's Cognito issuer URL.
+
+Next.js public settings are embedded when building the frontend. A local
+staging export may use process-only overrides while preserving `.env.local`;
+restore the previous process values afterward. These addresses/client IDs
+are public configuration, never credentials. Suppress the development
+workspace default until a real staging membership exists: a process override
+containing one space is trimmed to no default by the application. Removing
+that override before the build would allow `.env.local` to supply its default.
+A successful export is only local build evidence: no frontend upload,
+working browser login, API attachment, provider access, or runtime start
+is established by this checkpoint.
+
+### Local staging frontend export verified on 17 October 2026
+
+The operator reported successful `npm.cmd run lint` and `npm.cmd run build`
+with Next.js 16.3.5 and `WEB_OUTPUT_MODE=export`. The guarded local check
+confirmed `out/index.html` and `out/auth/callback.html` exist, and found
+the expected staging API base URL, managed-login URL, public app client ID,
+and callback URL as exact quoted literals in the exported JavaScript.
+The command finished with its local-export PASS message and Git status
+showed only the two intended Markdown documentation changes.
+
+The procedure temporarily overrides six process environment variables and
+restores their previous values and the working directory in `finally`.
+It does not edit `.env.local`; Next.js listing that file in its build log
+does not mean it overrides explicitly supplied process settings. The single
+space workspace override deliberately produces no default workspace rather
+than inheriting a development value. Generated `.next/` and `out/` files are
+ignored by Git and are not part of the documentation commit.
+
+No S3 upload, CloudFront invalidation, Terraform apply, or ECS service start
+was part of this command. This is local build/configuration evidence only,
+not proof of deployed website contents, successful sign-in, API connectivity,
+or AI functionality. Keep runtime and the CloudFront API connection disabled.
 
 ## 5. Future live phases — hold until separately approved
 
