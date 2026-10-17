@@ -78,13 +78,19 @@ account plan or buy extra capacity as an access workaround.
   `scripts/` or `docs/demo-data/`; do not invent ECS commands such as
   `python -m scripts.bootstrap_cognito_identity`. A separately reviewed
   synthetic seeding/provisioning path is required for authenticated tests.
+  The [manual identity-seed implementation guide](staging-identity-seed-implementation.md)
+  supplies a proposed module and offline tests. Its documentation-only QA
+  does not clear this live hold; the source must be added by the operator,
+  tested, packaged in a newly scanned image, and reviewed for execution.
 - **Browser integration (static HTML verified):** The dedicated staging
   Cognito/frontend outputs match the local API identity/origin inputs, and
   the reviewed export is published with home/callback HTTP 200 HTML checks
-  recorded in section 4. Real-browser JavaScript/CSS behavior, sign-in, and
-  application membership remain unverified. Source defaults being blank does
-  not mean a staging pool is absent; static delivery and deployed Cognito
-  resources do not prove a working authenticated application.
+  recorded in section 4. A separate read-only browser check observed styled
+  desktop layout and the callback's expected missing-login state. Full
+  browser workflows, sign-in, and application membership remain unverified.
+  Source defaults being blank does not mean a staging pool is absent;
+  static delivery and deployed Cognito resources do not prove a working
+  authenticated application.
 - **Private document storage:** `document_storage_backend` defaults to
   `disabled`, and the staging API task does not configure its S3 backend
   or document bucket. A basic upload test is not proof of the V0.4 S3
@@ -207,9 +213,10 @@ both returned HTTP 200 HTML through CloudFront.
 
 The upload block is now historical: do not rerun it on the populated bucket.
 No API attachment, invalidation, Terraform apply, or service start was part
-of the reported operation. Browser JavaScript/CSS behavior, sign-in/API/AI,
-and runtime shutdown remain unverified; this milestone does not authorize
-any runtime phase below.
+of the reported operation. A later read-only browser check confirmed limited
+desktop styling/layout and callback JavaScript execution without signing in;
+full browser workflows, sign-in/API/AI, and runtime shutdown remain unverified.
+This milestone does not authorize any runtime phase below.
 
 ## 5. Future live phases — hold until separately approved
 

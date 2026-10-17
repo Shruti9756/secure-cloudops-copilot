@@ -64,6 +64,21 @@ These are the operator's reported results from the guarded procedure below,
 not a separate independent AWS audit. No invalidation, Terraform apply,
 API attachment, or runtime-start command was part of this operation.
 
+### Read-only browser rendering check — 17 October 2026
+
+A separate browser check observed the styled dashboard at a 1280-by-720
+viewport, loaded its same-origin stylesheet, and found no horizontal
+overflow. The captured console contained no warnings/errors. Workspace
+guidance and disabled upload controls matched the anonymous initial state.
+The operational/service labels are static demo content, not live AWS health.
+
+Opening `/auth/callback.html` without login parameters changed from the
+preparing state to the expected "Sign-in was not completed" state. This
+demonstrates execution of the callback's client-side JavaScript, not a real
+Cognito sign-in attempt or authentication failure. No sign-in, workspace,
+refresh, upload, or question action was invoked. These limited rendering
+checks do not verify all assets, responsive sizes, or authenticated flows.
+
 ## 2. Historical first-publication block — completed; do not rerun
 
 The following is the original operator-run block, retained for reference.
@@ -278,10 +293,11 @@ static HTML delivery only; it does not upload, sign in, or call the API.
 }
 ```
 
-Successful static HTML delivery is not evidence of working JavaScript/CSS in a real browser,
-Cognito-to-application membership, API connectivity, or AI functionality.
-Those remain separate checks. The displayed dashboard's operational/demo
-labels are not backend health evidence.
+These HTTP checks alone do not establish browser behavior. The separate
+read-only rendering check above adds limited CSS/layout and callback
+JavaScript evidence, not Cognito-to-application membership, API connectivity,
+or AI functionality. Those remain separate checks. The displayed dashboard's
+operational/demo labels are not backend health evidence.
 
 ## 4. Stop conditions and recovery
 
