@@ -2,9 +2,10 @@
 
 Prepared on 16 October 2026 for `codex/v04-aws-platform`.
 
-**Status: documentation/preflight only. No live session is approved by this
-document, and these service-start/shutdown procedures have not been tested
-on AWS. Do not execute the future live phases yet.** Keep
+**Status: static website publication and two HTTPS HTML routes verified on
+17 October 2026. No runtime session is approved by this document, and the
+service-start/shutdown procedures have not been tested on AWS. Do not
+execute the future live phases yet.** Keep
 `runtime_enabled=false`, `staging_document_queue_backend="disabled"`,
 `staging_api_connection_mode="disabled"`, and all ECS service desired
 counts at zero while resolving the holds below.
@@ -49,6 +50,7 @@ a hold, not permission to accept an arbitrary different digest or rebuild.
 | Session | Permitted objective | Still prohibited |
 | --- | --- | --- |
 | Planning/preflight (current) | Read configuration, validate, inspect identity/image metadata, review plans, and build the static frontend locally | Apply, create runtime resources, scale services up, attach the API origin, upload test data |
+| Static website checkpoint (completed) | Publish the reviewed 29-file export to the existing private bucket; verify home/callback HTTP 200 HTML through CloudFront | Runtime start, API attachment, knowledge-document uploads, and claims of working sign-in or AI |
 | Future non-AI connectivity test | Bootstrap the private database; run only the API; verify ALB readiness and approved HTTPS status route | Worker/publisher start, uploads, embedding, chat, and claiming full V0.4 success |
 | Future full staging test | Approved identity/workspace setup, API, SQS worker/publisher, synthetic ingestion, and cited answers | Unreviewed providers, development identities, real documents, unbounded retries |
 
@@ -76,13 +78,13 @@ account plan or buy extra capacity as an access workaround.
   `scripts/` or `docs/demo-data/`; do not invent ECS commands such as
   `python -m scripts.bootstrap_cognito_identity`. A separately reviewed
   synthetic seeding/provisioning path is required for authenticated tests.
-- **Browser integration (partially prepared):** The dedicated staging
+- **Browser integration (static HTML verified):** The dedicated staging
   Cognito/frontend outputs match the local API identity/origin inputs, and
-  the local staging frontend export passed the checks recorded in section 4.
-  Publishing that export and verifying browser sign-in/application membership
-  remain separate steps. Source defaults being blank does not mean a staging
-  pool is absent; deployed Cognito resources and a local build do not prove
-  a working authenticated application.
+  the reviewed export is published with home/callback HTTP 200 HTML checks
+  recorded in section 4. Real-browser JavaScript/CSS behavior, sign-in, and
+  application membership remain unverified. Source defaults being blank does
+  not mean a staging pool is absent; static delivery and deployed Cognito
+  resources do not prove a working authenticated application.
 - **Private document storage:** `document_storage_backend` defaults to
   `disabled`, and the staging API task does not configure its S3 backend
   or document bucket. A basic upload test is not proof of the V0.4 S3
@@ -186,6 +188,28 @@ No S3 upload, CloudFront invalidation, Terraform apply, or ECS service start
 was part of this command. This is local build/configuration evidence only,
 not proof of deployed website contents, successful sign-in, API connectivity,
 or AI functionality. Keep runtime and the CloudFront API connection disabled.
+
+### Static-website upload preview verified on 17 October 2026
+
+The operator's owner-checked bucket listing returned no objects. The
+distribution was deployed with the expected single S3 origin and no API
+cache behavior. All 29 dry-run uploads targeted the frontend bucket; the
+reviewed export fingerprint matched. No upload/deletion occurred.
+
+### Static website publication and HTML delivery verified on 17 October 2026
+
+The operator completed the [create-only first publication](staging-frontend-publication.md):
+13 JavaScript/CSS assets, 12 Next.js text files, and four HTML files, with
+`index.html` last. Every object passed checksum, size, content-type,
+cache-control, and AES256 checks, and the final inventory matched all 29
+reviewed keys/sizes. The website home page and `/auth/callback.html` then
+both returned HTTP 200 HTML through CloudFront.
+
+The upload block is now historical: do not rerun it on the populated bucket.
+No API attachment, invalidation, Terraform apply, or service start was part
+of the reported operation. Browser JavaScript/CSS behavior, sign-in/API/AI,
+and runtime shutdown remain unverified; this milestone does not authorize
+any runtime phase below.
 
 ## 5. Future live phases — hold until separately approved
 

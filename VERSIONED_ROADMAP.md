@@ -303,7 +303,7 @@
 - [ ] Understand the cost/security tradeoff of NAT gateways; avoid them until required.
 - [ ] Create ECR repositories for Docker images.
 - [ ] Build and push immutable SHA-tagged images.
-- [ ] Host the exported frontend in a private Amazon S3 bucket behind CloudFront.
+- [x] Host the exported frontend in a private Amazon S3 bucket behind CloudFront. Operator-verified on 17 October 2026: 29 reviewed objects passed checksum/metadata checks, and the home/callback routes returned HTTP 200 HTML. Evidence: [first static publication](docs/deployment/staging-frontend-publication.md). Browser sign-in, API connectivity, and AI functionality remain unverified.
 - [ ] Deploy the API and worker containers to Amazon ECS Fargate.
 - [ ] Use CloudFront HTTPS for the frontend; design the API's HTTPS entry point and Application Load Balancer separately.
 - [ ] Move PostgreSQL to Amazon RDS with backups, encryption, and private access.
