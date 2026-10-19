@@ -5,3 +5,11 @@ output "repository_urls" {
     name => repository.repository_url
   }
 }
+
+output "repository_arns" {
+  description = "ECR repository ARNs for repository-scoped IAM policies."
+  value = {
+    for name, repository in aws_ecr_repository.image :
+    name => repository.arn
+  }
+}

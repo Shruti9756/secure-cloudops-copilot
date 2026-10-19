@@ -77,3 +77,8 @@ output "api_load_balancer" {
     security_group_id = aws_security_group.api_private_alb[0].id
   }, null)
 }
+
+output "identity_seed_task_definition_arn" {
+  description = "One-off staging identity seed task definition; Terraform does not run it."
+  value       = try(aws_ecs_task_definition.identity_seed[0].arn, null)
+}
