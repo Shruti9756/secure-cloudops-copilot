@@ -4,9 +4,10 @@ Prepared on 16 October 2026 for `codex/v04-aws-platform`.
 
 **Status: static website publication and two HTTPS HTML routes verified on
 17 October 2026; replacement API image publication verified on 18 October
-2026. No runtime session is approved by this document, and the
-service-start/shutdown procedures have not been tested on AWS. Do not
-execute the future live phases yet.** Keep
+2026; exact published-image local pull and offline identity-module import
+verified on 19 October 2026. No runtime session is approved by this document,
+and the service-start/shutdown procedures have not been tested on AWS.
+Do not execute the future live phases yet.** Keep
 `runtime_enabled=false`, `staging_document_queue_backend="disabled"`,
 `staging_api_connection_mode="disabled"`, and all ECS service desired
 counts at zero while resolving the holds below.
@@ -47,8 +48,15 @@ created or a mandatory count for future plans. No apply was performed.
 
 This source-selection checkpoint does not deploy any service. The
 replacement image's presence in ECR is not evidence that ECS pulled it or
-that the staging identity seed was imported or executed inside it. Keep
-all live-phase holds below in force.
+that the staging identity seed executed inside it. On 19 October, the
+operator separately pulled the exact digest locally and passed the
+[offline import check](api-image-security.md#published-image-pull-and-offline-import--verified-19-october-2026):
+`linux/amd64`, configured/non-root `app` user, expected module and migration
+files, and import without database access. The temporary authentication
+override was cleared before the network-disabled container check. No
+seed function, API server, migration, or AWS runtime service was started.
+Keep all live-phase holds below in force; a local pull does not prove an
+ECS execution role can pull or start this image.
 
 Before a live session, re-confirm that the tag still exists and maps to
 that digest; repository lifecycle rules can expire immutable images.
@@ -96,11 +104,13 @@ account plan or buy extra capacity as an access workaround.
   The operator has now added `app.db.staging_identity` and reported 60
   targeted tests and 675 total unit tests passing, with six E2E tests
   deselected. The 18 October image was built and scanned from a commit
-  containing that module. These offline/publication checks do not clear
-  the live hold: module import in the published runtime, PostgreSQL grants,
-  verified Cognito-sub mapping, and a separately reviewed restricted-role
-  execution path remain unverified. Never reuse the administrator bootstrap
-  task with a command override to run this seed.
+  containing that module. On 19 October, the operator verified its import
+  as non-root in the exact published image, locally with networking
+  disabled and database-access guards. These offline/publication checks
+  do not clear the live hold: PostgreSQL grants, verified Cognito-sub
+  mapping, and a separately reviewed restricted-role execution path remain
+  unverified. Never reuse the administrator bootstrap task with a command
+  override to run this seed.
 - **Browser integration (static HTML verified):** The dedicated staging
   Cognito/frontend outputs match the local API identity/origin inputs, and
   the reviewed export is published with home/callback HTTP 200 HTML checks

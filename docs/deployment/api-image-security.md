@@ -92,11 +92,11 @@ The exact replacement image reference is:
 ```
 
 This is registry-publication proof, not proof that ECS can pull/start the
-replacement, that its identity module imports inside the runtime, or that
-live database seeding, restricted grants, browser authentication, or any
-application deployment succeeded. The source-selection and runtime-off
-plan review below is a configuration checkpoint only. No runtime
-activation is implied.
+replacement or that live database seeding, restricted grants, browser
+authentication, or any application deployment succeeded. The separate
+19 October local-image checkpoint below verifies offline import only.
+The source-selection and runtime-off plan review is a configuration
+checkpoint only. No runtime activation is implied.
 
 ### Source-selection review — 18 October 2026
 
@@ -121,6 +121,44 @@ not an assertion about applied AWS state or a required count for future
 plans. No new image build/publication is required solely for this
 Terraform/documentation handoff; the approved application image remains
 the verified `ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a` artifact above.
+
+### Published-image pull and offline import — verified 19 October 2026
+
+The operator reported a successful Docker Desktop pull of the exact
+replacement digest above, followed by all four guarded PASS messages.
+Local inspection confirmed `linux/amd64`, configured user `app`, and the
+expected complete ECR reference in `RepoDigests`. This is a real local
+pull, not just registry metadata or an IAM simulation.
+
+The check ran a disposable container as `app`, with networking disabled,
+a read-only filesystem, image health check disabled, all capabilities
+dropped, no-new-privileges, and no host mounts or explicitly supplied
+environment settings. It used `--pull never` and a Python stdin entry
+point instead of the image's normal FastAPI command. Before importing
+`app.db.staging_identity`, the check replaced SQLAlchemy engine creation
+and connection entry points with functions that fail on use.
+
+The reported output confirmed the non-root import, expected module path
+and `manager` constant, callable seed entry points, and the presence of
+`/app/alembic.ini` and `/app/migrations/env.py`. The entry points were
+inspected, not invoked. No database connection, migration, identity seed,
+API server, or AWS runtime service was started by this check. Git status
+was empty afterward.
+
+For the local pull, Docker authentication was supplied through a
+process-only `DOCKER_AUTH_CONFIG` override and cleared in `finally`
+before container execution. No credential file or global Docker setting
+was changed by this block. The earlier Windows credential-store failure
+and missing `ecr:GetDownloadUrlForLayer` permission were separate issues;
+the operator's corrected permission simulation reported both
+`ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` allowed before the
+successful pull. This does not establish ECS execution-role permissions.
+
+This closes local packaging/import verification, not the cloud identity
+or deployment hold. PostgreSQL grants, verified staging Cognito-sub
+mapping, a reviewed restricted-role seed execution path, and live ECS
+image/network evidence remain unverified. No rebuild or publication is
+needed solely to record this checkpoint.
 
 ## API image publication — verified 16 October 2026
 
