@@ -5,7 +5,9 @@ Prepared on 16 October 2026 for `codex/v04-aws-platform`.
 **Status: static website publication and two HTTPS HTML routes verified on
 17 October 2026; replacement API image publication verified on 18 October
 2026; exact published-image local pull and offline identity-module import
-verified on 19 October 2026. No runtime session is approved by this document,
+verified on 19 October 2026; six task-operator IAM simulations reported
+allowed on 19 October 2026, followed by the complete 22-check IAM
+checkpoint reported on 20 October 2026. No runtime session is approved by this document,
 and the service-start/shutdown procedures have not been tested on AWS.
 Do not execute the future live phases yet.** Keep
 `runtime_enabled=false`, `staging_document_queue_backend="disabled"`,
@@ -74,6 +76,7 @@ a hold, not permission to accept an arbitrary different digest or rebuild.
 | --- | --- | --- |
 | Planning/preflight (current) | Read configuration, validate, inspect identity/image metadata, review plans, and build the static frontend locally | Apply, create runtime resources, scale services up, attach the API origin, upload test data |
 | Static website checkpoint (completed) | Publish the reviewed 29-file export to the existing private bucket; verify home/callback HTTP 200 HTML through CloudFront | Runtime start, API attachment, knowledge-document uploads, and claims of working sign-in or AI |
+| Future database/identity-only test | Bootstrap the database and run the restricted synthetic identity seed; keep every application service at zero, then shut down | API/worker/publisher start, API-origin attachment, uploads, AI calls, and claims of working browser sign-in |
 | Future non-AI connectivity test | Bootstrap the private database; run only the API; verify ALB readiness and approved HTTPS status route | Worker/publisher start, uploads, embedding, chat, and claiming full V0.4 success |
 | Future full staging test | Approved identity/workspace setup, API, SQS worker/publisher, synthetic ingestion, and cited answers | Unreviewed providers, development identities, real documents, unbounded retries |
 
@@ -107,10 +110,13 @@ account plan or buy extra capacity as an access workaround.
   containing that module. On 19 October, the operator verified its import
   as non-root in the exact published image, locally with networking
   disabled and database-access guards. These offline/publication checks
-  do not clear the live hold: PostgreSQL grants, verified Cognito-sub
-  mapping, and a separately reviewed restricted-role execution path remain
-  unverified. Never reuse the administrator bootstrap task with a command
-  override to run this seed.
+  do not clear the live hold. The dedicated runtime-gated identity-seed
+  task definition is now committed, and the operator found the intended
+  staging user's actual `sub` privately after completing its password
+  change. PostgreSQL grants and the actual database mapping remain
+  unverified; the bounded launch/observation commands still need review
+  before a paid session. Never reuse the administrator bootstrap task with
+  a command override to run this seed.
 - **Browser integration (static HTML verified):** The dedicated staging
   Cognito/frontend outputs match the local API identity/origin inputs, and
   the reviewed export is published with home/callback HTTP 200 HTML checks
@@ -247,6 +253,144 @@ desktop styling/layout and callback JavaScript execution without signing in;
 full browser workflows, sign-in/API/AI, and runtime shutdown remain unverified.
 This milestone does not authorize any runtime phase below.
 
+### Identity and task-operator checkpoint reported on 19 October 2026
+
+The operator reported the intended staging Cognito user as confirmed and
+enabled after changing its temporary password, and located its actual
+`sub` in the correct staging pool. No email, subject value, password, JWT,
+or callback query string is recorded here. The browser callback still
+reported a generic sign-in failure with the API connection disabled;
+successful OAuth token exchange and an accepted application session have
+not been established.
+
+The account-plan read reported `FREE`, `ACTIVE`, **USD 137.77** remaining
+credits, and plan expiration `2027-01-29T09:35:16.346000+00:00`. This is a
+point-in-time account-plan result, not a spending cap or a guarantee about
+every credit grant's expiration. Refresh it before an approved cost window.
+
+After a manual amendment to the existing customer-managed
+`SecureCloudOpsStagingEcsClusterTerraform` policy, all six operator
+simulations reported `allowed`: `RunTask` for each of the database-bootstrap
+and identity-seed families, `DescribeTasks`, `StopTask`, `ListTasks`, and
+`DescribeTaskDefinition`. The proposed amendment is intended to preserve
+cluster management, restrict its new launch grant to those two families
+in the exact staging cluster, permit inspecting/stopping that cluster's
+tasks, and add task-list/definition metadata reads. Positive simulations
+alone do not prove these scope boundaries or the active policy document.
+This is not evidence of a real launch,
+Terraform create/delete permissions, or a least-privilege operator identity;
+the inherited `Developers` group includes broader permissions.
+
+The logging evidence is deliberately recorded as inconsistent: principal
+simulation returned `implicitDeny` for the hypothetical seed log stream,
+while the inherited `CloudWatchFullAccess` policy allowed `logs:*` and no
+user permissions boundary was attached. A real `GetLogEvents` request in
+the API log group, targeting a fresh diagnostic stream name with a
+`[0,1)` millisecond time range and displaying only `length(events)`, exited
+zero and returned zero events. This does not verify the anticipated
+missing-resource error or retrieval of future bootstrap/seed success logs. No additional logging
+grant was made; verify the actual task's log stream during a separately
+approved session. Unrelated missing-context keys are not values to invent
+just to obtain an allowed simulation.
+
+No runtime apply, ECS task launch, application identity seed, or service
+start was reported as part of these checks. Do not reuse the original
+ten-row gate as a complete readiness test. The provisioning/runtime-off
+IAM review continued at the checkpoint below; separately reviewed
+standalone-task launch and cleanup commands remain required.
+
+### Provisioning and runtime-off IAM checkpoint reported on 20 October 2026
+
+The operator reported that default version `v3` of the existing
+`SecureCloudOpsStagingEcsClusterTerraform` managed policy matched the
+reviewed 20-statement document. The normalized-document comparison
+preserved the five earlier statements and checked the complete replacement,
+not merely its statement count. No new policy attachment was required.
+
+All 20 positive statement groups simulated as allowed, covering the
+existing cluster/setup-task operations and the added ECS task/service,
+RDS, Valkey, secret, and SQS operations. This includes the RDS-instance,
+Valkey-replication-group, ECS-service deletion and task-definition
+deregistration needed for the reviewed runtime-off cycle. The two negative
+checks also passed: direct `RunTask` for the API family was denied, and
+task-definition deregistration outside `us-east-1` was denied. The latter
+action uses `Resource: "*"` because its IAM action does not support
+task-definition resource scoping; it is not family-restricted within the
+approved region.
+
+The checks used synthetic future resource identifiers, performed no
+tested create/delete/run operation, and retrieved no secret values.
+The new grants do not add deletion of persistent queues, application
+secrets or subnet groups, SQS message operations, master-password
+retrieval, or customer-managed KMS-key permissions. They target the
+reviewed first create/runtime-off cycle, not arbitrary later upgrades or
+token rotation. Existing broader inherited grants were not removed.
+
+This is simulated authorization evidence, not proof of live provisioning,
+Free-plan service eligibility, actual task execution, successful seed-log
+retrieval, or cost-free operation. The two security-group exclusive-rule
+updates still need full before/after review, and a fresh credit check,
+explicit session purpose/cost window, bounded task observation, and
+shutdown procedure are still required before any credit-consuming runtime apply.
+
+### Saved-plan security-group review reported on 20 October 2026
+
+The operator's refreshed account-plan result was `FREE`, `ACTIVE`, with
+USD **137.74** remaining and the same 29 January 2027 plan expiration.
+This is a point-in-time balance, not a session spending cap. No account
+upgrade, runtime apply, or task launch was part of this checkpoint.
+
+Validation succeeded and the saved runtime-on, queue-disabled preview
+again reported **46 additions, 2 in-place updates, and 0 deletes**. The
+printed managed-resource list matched the earlier proposal. The temporary
+plan is sensitive, is not a source artifact, and is not approved for
+execution merely because it was saved or inspected.
+
+The focused before/after JSON and owner-checked live rule descriptions
+confirmed the following existing-rule preservation:
+
+| Rule set | Existing rules retained | Intended addition |
+| --- | --- | --- |
+| API ingress | One TCP 8000 rule from the existing load-balancer security group | One TCP 8000 rule from the new private API ALB security group |
+| API egress | All three rules: HTTPS 443, PostgreSQL 5432, and cache 6379 | None |
+| Database ingress | Both TCP 5432 rules from API and worker security groups | One TCP 5432 rule from the publisher security group |
+| Database egress | Empty | None |
+
+The new ingress IDs appeared as `null` with corresponding
+`after_unknown=true` entries because the rules do not exist yet. Comparing
+those unknown entries with the actual source references identifies the
+private-ALB and publisher additions; it is not proof those rules were
+created. The existing older load-balancer API ingress remains permitted,
+so do not describe the resulting API group as allowing only the new ALB.
+The existing `0.0.0.0/0` rule is outbound HTTPS, not public inbound API or
+PostgreSQL access. Both inspected groups belonged to the expected account.
+
+This clears the focused plan-level SG ownership review, not live network
+connectivity. Retain the other relevant session gates: exact standalone
+task launch/observation/shutdown commands, actual registered task-role and
+image checks, explicit test purpose/duration, current pricing/credit
+review, and separate authorization before any runtime apply.
+
+### Runtime-on preview reported on 19 October 2026
+
+The operator's staging validation succeeded. A speculative plan with
+`runtime_enabled=true` and `staging_document_queue_backend="disabled"`
+reported **46 additions, 2 in-place changes, and 0 destroys**. RDS was
+`db.t4g.micro`, 20 GiB, and not publicly accessible; Valkey was
+`cache.t4g.micro`; the ALB was internal. The API and worker services both
+had desired count zero. The two updates were the API/database security
+groups' exclusive-rule resources, whose full before/after ownership still
+needs review before apply.
+
+Disabled queue mode does not remove the persistent SQS/DLQ definitions
+or publisher role/log/security-group foundations from this plan. No
+publisher ECS service or publisher task definition was proposed. Deferred
+IAM-policy-document reads are data evaluation, not additional running
+services. This preview did not apply anything, save an approved execution
+plan, or establish create/delete authorization. The later 20 October IAM
+checkpoint records the consolidated policy review and simulations; it does
+not approve applying this preview or replace the remaining session gates.
+
 ## 5. Future live phases — hold until separately approved
 
 Do not execute this section now. A valid plan with errors elsewhere in its
@@ -258,16 +402,64 @@ review the full plan, and agree the stop time before proceeding.
 | A: Provision, not start | Review a fresh platform runtime-on plan with real staging identity/origin inputs. Use queue `disabled` for non-AI testing; use `sqs` only for an approved full test. Apply only after explicit approval. All created service desired counts must remain zero. Record the creation/start-of-cost time. | Unexpected replacements/destruction, paid topology changes, missing credentials, or failed/partial apply |
 | B: Inspect resources | RDS `secure-cloudops-staging-db` and Valkey `secure-cloudops-staging-cache` are available in private subnets; RDS is not public. Private ALB is active. Read actual task ARNs and ALB identifiers from the existing outputs below. Confirm execution/task roles, secret references, approved image, and logs without printing secret values. | A public database/cache, wrong network/role/image, or unresolved partial apply |
 | C: Bootstrap once | Use the guarded bootstrap procedure in the on-demand guide. Record the returned task ARN/client token. Inspect that same task's image/platform evidence. Require named container `database-bootstrap`, `STOPPED`, exit code `0`, and the success log before any service start. | Timeout, uncertain RunTask result, missing digest evidence, or nonzero/missing exit code; do not launch a duplicate task |
+| C2: Identity test only | After successful bootstrap, use the dedicated restricted identity-seed task and the execution gate below if an identity test is explicitly approved. Keep services at zero. Require the same task's approved image/platform, named container `identity-seed`, `STOPPED`, exit code `0`, and sanitized completion evidence. An anonymous API liveness test may skip this phase. | Missing launch-command review, incorrect subject/role/secret, unresolved database grants, timeout, or nonzero/missing exit code; never substitute the administrator bootstrap task |
 | D: Start API only | Inspect the exact API service at zero tasks and its expected task ARN. Deliberately scale it to one. Verify counts, task image/platform, and ALB target health before preparing the browser path. | Any deployment loop, dependency failure, wrong task/image, or unhealthy target |
 | E: Browser/API path | In the frontend root only, prepare a VPC origin from that same active ALB, verify it is deployed, then attach the API route through a separately reviewed plan. After distribution deployment, verify the HTTPS `/api/v1/status` JSON response. The static website stays private behind CloudFront. | Wrong ALB identifiers, failed CloudFront deployment, incorrect HTTPS response, insecure entry workaround, or deadline reached |
-| F: Full test only | Complete approved synthetic tenant/user/membership provisioning and provider/storage readiness. Start worker, then outbox publisher, one at a time after their gates. Perform one approved synthetic upload/processing/question/citation/audit test, including approved S3 storage/download checks. Record queue, database state, and application evidence; a worker log alone does not prove SQS delivery. | Provider/storage/permission failures, unexpected DLQ growth, failed authorization/citation, or repeated retries |
+| F: Full test only | Require completed C2 identity provisioning and provider/storage readiness. Start worker, then outbox publisher, one at a time after their gates. Perform one approved synthetic upload/processing/question/citation/audit test, including approved S3 storage/download checks. Record queue, database state, and application evidence; a worker log alone does not prove SQS delivery. | Provider/storage/permission failures, unexpected DLQ growth, failed authorization/citation, or repeated retries |
 | G: Stop and remove | Execute section 9 even after a failed test. Stop task counts, detach/delete the API VPC origin, then review runtime removal. Verify absence and remaining costs. | Uncertain service/task status or still-attached CloudFront origin: investigate rather than deleting dependencies blindly |
+
+An explicitly approved database/identity-only session can stop after C2
+and proceed directly to shutdown without starting an application service.
+The current runtime switch still provisions RDS, Valkey, and the ALB in
+that case; it is not a database-only cost switch.
+
+### Restricted identity-seed execution gate — future, not launch approval
+
+These are the required ordering and acceptance checks. The exact bounded
+PowerShell launch/observation commands still need a separate review in
+chat before a paid session; this checklist is not permission to improvise
+or execute a `RunTask` command now.
+
+1. Require approved purpose, duration, credits, cleanup owner, full plan,
+   provisioning/deletion permissions, and successful database bootstrap.
+2. Read the actual registered `identity_seed_task_definition_arn`. Verify
+   the exact account, region, family/revision, approved image mapping,
+   Linux/X86_64 platform, container `identity-seed`, dedicated execution
+   role, no application task role, restricted `securecloudops_app`
+   database user, and only the application database-password secret.
+   Check all staging guards. Never pass a master password to this task.
+3. Select an owner-checked public staging subnet and a reviewed security
+   group with PostgreSQL/HTTPS egress. A public IP supplies AWS-service
+   egress because this VPC has no NAT/endpoints; it does not make RDS
+   public or justify opening inbound database ports.
+4. Confirm the exact intended staging user's `sub` privately. The sole
+   container-command override is `python -m app.db.staging_identity --subject <operator-verified-sub>`; do not override environment,
+   roles, image, or secrets. The subject is not a login credential, but
+   task overrides/audit records can expose it to authorized operators;
+   keep it out of shared outputs, source files, and Git.
+5. Retain a unique client token and record the returned task ARN. Require
+   exactly one task and zero failures. For timeout/uncertain results,
+   inspect the same request/task before acting; do not generate a new
+   token or blindly launch again, even though the seed is idempotent.
+6. Inspect that same task. Require `STOPPED`, exactly one named seed
+   container, exit code `0`, approved image/platform evidence, and a
+   sanitized `Staging identity seed completed:` message and `role=manager`.
+   A fresh seed should report all four creation flags as `True`; an exact,
+   separately approved repeat should report all four as `False`. An
+   unexpected mixture needs investigation, not acceptance or a blind rerun.
+   A stopped task alone is not success.
+   Keep any application-authentication acceptance test separate.
+7. Record both bootstrap and identity-seed task ARNs for shutdown. Capture
+   sanitized completion/failure evidence before runtime-off removes the
+   seed's runtime-gated log group; its seven-day retention setting does
+   not preserve the group after Terraform deletes it.
 
 ### Existing outputs: use these names, not invented service outputs
 
 From the platform root, read `network_summary`, `ecs_cluster_summary`,
 `ecs_role_arns`, `api_load_balancer`, `api_task_definition_arn`,
-`worker_task_definition_arn`, and `database_bootstrap_task_definition_arn`.
+`worker_task_definition_arn`, `database_bootstrap_task_definition_arn`, and
+`identity_seed_task_definition_arn`.
 For SQS mode also read `document_queue_summary` and
 `publisher_task_definition_arn`. Runtime task/ALB outputs are absent while
 off; the publisher exists only when runtime is on **and** queue mode is
@@ -475,7 +667,7 @@ not success. Only after that and approved CloudFront attachment:
 ## 8. Observation, timeout, and failure recovery
 
 Inspect the scoped ECS service events/stopped tasks and CloudWatch groups
-`/ecs/secure-cloudops-staging/{api,worker,publisher,database-bootstrap}`.
+`/ecs/secure-cloudops-staging/{api,worker,publisher,database-bootstrap,identity-seed}`.
 Record task stop codes and safe error categories; inspect/sanitize logs
 before sharing. Never paste JWTs, AWS credentials, secret values, or raw
 document contents into logs, issues, or this runbook.
@@ -556,9 +748,11 @@ not automatically rolled back; refresh/review a new plan before acting.
 
 3. Inspect each selected service until desired/running/pending are all
    zero, and verify its tracked tasks stopped. Also inspect the recorded
-   standalone bootstrap task: scaling services does not stop a standalone
-   RunTask. If it is unexpectedly still running, obtain explicit approval
-   to stop that exact task ARN; do not launch another bootstrap.
+   standalone database-bootstrap and identity-seed tasks: scaling services
+   does not stop a standalone RunTask. For either task still running,
+   obtain explicit approval to stop that exact recorded ARN; do not launch
+   a replacement. Save sanitized task-exit and log evidence before deleting
+   the runtime-gated seed log group or its database dependencies.
 4. If attached, change CloudFront API mode `attached` to `prepared`,
    review/apply the frontend-only change, and verify the distribution is
    `Deployed`. Then change `prepared` to `disabled`, review/apply, and
@@ -569,6 +763,7 @@ not automatically rolled back; refresh/review a new plan before acting.
    RDS configuration skips the final snapshot and deletes automated backups.
    Expected removals include runtime RDS/Valkey, API/worker and optional
    publisher services/tasks, bootstrap task and runtime-only policies,
+   identity-seed task/execution role/policy/log group,
    private ALB/listener/target group and their runtime security resources.
    Preserve network, ECR, ECS cluster, persistent roles/secrets/queues,
    static website, and staging Cognito. Stop on unrelated destruction.
@@ -584,7 +779,7 @@ not automatically rolled back; refresh/review a new plan before acting.
 ## 10. Evidence required before calling a session successful
 
 Record the approved purpose, source/image identifiers and manifest mapping,
-start/stop times, real non-sensitive outputs, bootstrap exit result,
+start/stop times, real non-sensitive outputs, bootstrap and any seed exit results,
 service counts/tasks, ALB health, HTTPS response, and any full-test case IDs.
 Record failed/skipped gates honestly. Preserve the final runtime-off plan
 and deletion checks, with any residual costs/resources noted. Do not store
@@ -599,6 +794,8 @@ cleanup/rollback boundaries.
 
 - [ECS service stability waiter](https://docs.aws.amazon.com/cli/latest/reference/ecs/wait/services-stable.html): stability checks desired/running counts, not full application behavior.
 - [ECS task inspection](https://docs.aws.amazon.com/cli/latest/reference/ecs/describe-tasks.html): task/container status, stop details, and manifest digest.
+- [IAM principal simulation](https://docs.aws.amazon.com/cli/latest/reference/iam/simulate-principal-policy.html): simulations do not launch tasks and are not substitutes for service-side verification.
+- [CloudWatch log reads](https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_GetLogEvents.html): event time ranges, empty responses, and lookup errors.
 - [ECS image resolution](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-type-ecs.html#deployment-container-image-stability): tag resolution and zero-desired-count limitations.
 - [ECR manifest lists](https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-multi-architecture-image.html): top-level lists can reference platform-specific images.
 - [CloudFront VPC origins](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html): active private origins and distribution association/removal requirements.
