@@ -7,9 +7,12 @@ Prepared on 16 October 2026 for `codex/v04-aws-platform`.
 2026; exact published-image local pull and offline identity-module import
 verified on 19 October 2026; six task-operator IAM simulations reported
 allowed on 19 October 2026, followed by the complete 22-check IAM
-checkpoint reported on 20 October 2026. No runtime session is approved by this document,
-and the service-start/shutdown procedures have not been tested on AWS.
-Do not execute the future live phases yet.** Keep
+checkpoint reported on 20 October 2026. On 28 October, the first controlled
+infrastructure attempt partially created resources, encountered two IAM
+denials, and was cleaned up; runtime OFF was independently verified.
+Database bootstrap, identity seeding, application startup, and a full
+service-start/shutdown cycle remain untested on AWS. This document does
+not approve another live session. Do not execute the future live phases yet.** Keep
 `runtime_enabled=false`, `staging_document_queue_backend="disabled"`,
 `staging_api_connection_mode="disabled"`, and all ECS service desired
 counts at zero while resolving the holds below.
@@ -390,6 +393,89 @@ services. This preview did not apply anything, save an approved execution
 plan, or establish create/delete authorization. The later 20 October IAM
 checkpoint records the consolidated policy review and simulations; it does
 not approve applying this preview or replace the remaining session gates.
+
+### Controlled attempt, verified cleanup, and IAM repairs — 28 October 2026
+
+The operator approved a database/identity-only test with a two-hour target,
+a USD 1 planning allowance, and personal responsibility for cleanup. The
+recorded session start was **19:00:43 IST**, the cleanup-start cutoff was
+20:00:43 IST, and the finish target was 21:00:43 IST. These were operator
+targets, not an automatic shutdown or a guaranteed spending cap. The
+pre-session account-plan read reported `FREE`, `ACTIVE`, **USD 137.53**
+remaining, with plan expiration `2027-01-29T09:35:16.346000+00:00`.
+That balance is not a final session-cost measurement.
+
+The fresh saved plan contained **46 additions, 2 updates, and 0 destroys**.
+Its API/worker services had desired count zero, publisher runtime was
+absent, RDS was private, the ALB was internal, and the live CloudFront
+distribution remained S3-only with no API routing. The operator applied
+that reviewed plan, but provisioning stopped after these real IAM denials:
+
+- `elasticache:CreateReplicationGroup` required authorization for
+  `arn:aws:elasticache:us-east-1:291667884598:parametergroup:*`; the reference
+  statement allowed only the named `default.valkey7` group. The Terraform
+  resource does not explicitly set `parameter_group_name`.
+- RDS creation progressed, but the provider's subsequent
+  `rds:DescribeDBInstances` lookup required
+  `arn:aws:rds:us-east-1:291667884598:db:*`, not only the named database ARN.
+  Provider 6.66.0 stores the generated database resource ID and reads it
+  through a `dbi-resource-id` filter. The earlier simulations missed this
+  request/resource distinction.
+
+This was a partial deployment, not an automatic rollback. The internal
+ALB was created. After adding an isolated read-only
+`ReadDatabaseMetadataInRegion` statement for `rds:DescribeDBInstances` on
+the regional/account `db:*` ARN, the operator confirmed the database was
+`available`, not public, and tracked by Terraform. Its create/delete grants
+were not widened. No ECS services or task definitions were created in this
+attempt, no Fargate tasks were launched, and bootstrap/identity seeding did
+not run. No API origin was attached to CloudFront.
+
+The operator reviewed a fresh runtime-off, queue-disabled plan with
+**0 additions, 1 update, and 13 destroys**, then applied it successfully.
+It removed RDS; the internal ALB, listener, target group and runtime security
+resources; the identity-seed log group/execution role/policy; and the
+runtime-only worker secret-read policy. The API exclusive-rule update
+removed the private-ALB ingress reference. Cleanup completed at
+**19:29:11 IST**, before the original cutoff.
+
+The separate operator-run verification reported:
+
+- Fresh runtime-off/queue-disabled Terraform plan: **no changes**.
+- Exact RDS lookup: `DBInstanceNotFound`.
+- Exact ALB lookup: `LoadBalancerNotFound`.
+- Exact Valkey replication-group lookup: `ReplicationGroupNotFoundFault`.
+- Staging ECS cluster: **no tasks with desired status `RUNNING`**.
+
+Runtime OFF is therefore verified for this attempt. Network, ECR, ECS
+cluster, persistent roles/logs, subnet groups, application secrets,
+SQS/DLQ and publisher foundations remain, as do the separate website and
+Cognito resources. Retained resources can still incur costs; this is not
+evidence of zero account cost. No final bill or post-session credit balance
+was reported.
+
+After cleanup, the operator repaired only the parameter-group ARN in the
+existing `CacheReferences` statement: `parametergroup:default.valkey7`
+became `parametergroup:*`. That statement still allows only
+`elasticache:CreateReplicationGroup`; the exact replication-group scope,
+subnet-group/generated-cluster references, existing cache actions, and
+isolated RDS metadata-read repair were retained. No policy version number
+is asserted here.
+
+An initial verifier incorrectly expected four top-level evaluation rows
+and stopped on the ARN template `${ResourceType}:${ResourceName}`. AWS now
+returns one aggregate `EvaluationResult` per action; concrete ARN decisions
+must be read from `ResourceSpecificResults`, using `EvalResourceName` and
+`EvalResourceDecision`. The corrected verifier checked the complete,
+untruncated response and reported all four intended cache resource checks
+allowed, with an unrelated replication-group ARN `implicitDeny`.
+
+Those are policy-content and simulation results, not successful cache
+creation, comprehensive provisioning authorization, or bootstrap/seed
+execution evidence. The aborted window is closed. Keep runtime/queue/API
+connection disabled; the repairs do not authorize another runtime-on apply
+or reuse of either saved plan. A new live attempt requires a fresh reviewed
+plan and an explicitly agreed purpose, time/cost window, and cleanup owner.
 
 ## 5. Future live phases — hold until separately approved
 
@@ -792,6 +878,9 @@ cleanup/rollback boundaries.
 
 ## Primary references
 
+- [IAM evaluation-result structure](https://docs.aws.amazon.com/IAM/latest/APIReference/API_EvaluationResult.html): action aggregates and per-resource results; top-level ARN templates are not customer resource ARNs.
+- [RDS provider 6.66.0 implementation](https://github.com/hashicorp/terraform-provider-aws/blob/v6.66.0/internal/service/rds/instance.go): generated resource IDs and filtered post-create metadata reads.
+- [ElastiCache provider 6.66.0 implementation](https://github.com/hashicorp/terraform-provider-aws/blob/v6.66.0/internal/service/elasticache/replication_group.go): parameter-group names are sent only when configured.
 - [ECS service stability waiter](https://docs.aws.amazon.com/cli/latest/reference/ecs/wait/services-stable.html): stability checks desired/running counts, not full application behavior.
 - [ECS task inspection](https://docs.aws.amazon.com/cli/latest/reference/ecs/describe-tasks.html): task/container status, stop details, and manifest digest.
 - [IAM principal simulation](https://docs.aws.amazon.com/cli/latest/reference/iam/simulate-principal-policy.html): simulations do not launch tasks and are not substitutes for service-side verification.
