@@ -289,31 +289,47 @@
 
 **Purpose:** Deploy the proven system on AWS using infrastructure as code. Start with a cost-conscious staging setup; do not keep all services running continuously while learning.
 
+## Verified checkpoint — 28 October 2026
+
+The AWS foundations are substantially built, but V0.4 is not release-ready.
+The operator verified a bounded runtime apply (**21 added, 1 changed, 0
+destroyed**), one successful Fargate database-bootstrap task in the approved
+image, and cleanup (**0 added, 1 changed, 21 destroyed**). A fresh OFF plan
+reported no changes; direct AWS checks confirmed RDS/Valkey/ALB absence,
+no tasks with desired status RUNNING, and one recent task record STOPPED.
+Evidence: [controlled session runbook](docs/deployment/staging-session-runbook.md).
+
+No identity-seed execution was confirmed. API/worker/publisher services
+were not started, and the browser-to-API/ingestion/answer flow remains
+unverified. The disposable database was deleted, including the schema and
+role just tested. Runtime remains OFF. These checkpoints are not a claim
+that the application is fully deployed or that a new live session is approved.
+
 ## Infrastructure as code
 
-- [ ] Create Terraform modules and separate `dev`/`staging` environments.
-- [ ] Run `terraform fmt`, validation, and plan in CI.
+- [x] Create Terraform modules and separate `dev`/`staging` environments. Definitions and validation exist for both; the live checkpoints here concern staging.
+- [ ] Run `terraform fmt`, validation, and plan in CI. Formatting and validation are implemented; an authenticated infrastructure-plan job is still pending.
 - [ ] Tag all AWS resources with project, environment, owner, and cost-center.
 - [ ] Configure budget alerts and clean-up instructions before applying infrastructure.
 - [ ] Use `terraform destroy` only for a reviewed, explicitly selected non-production environment.
 
 ## AWS core services
 
-- [ ] Create VPC, public/private subnets, route tables, and minimal security groups.
-- [ ] Understand the cost/security tradeoff of NAT gateways; avoid them until required.
-- [ ] Create ECR repositories for Docker images.
-- [ ] Build and push immutable SHA-tagged images.
+- [x] Create VPC, public/private subnets, route tables, and minimal security groups. Staging network foundations are applied; runtime private-ALB rule addition/removal was verified on 28 October.
+- [x] Understand the cost/security tradeoff of NAT gateways; avoid them until required. The reviewed design avoids NAT gateways; selected Fargate tasks use public-subnet outbound access while RDS/cache remain private.
+- [x] Create ECR repositories for Docker images. Staging API/web repositories exist; repository existence is not application deployment.
+- [x] Build and push immutable SHA-tagged runtime images. The approved API image is scanned and published; API/worker/bootstrap/seed/publisher recipes share that artifact. The chosen frontend is a static export, not a running web container.
 - [x] Host the exported frontend in a private Amazon S3 bucket behind CloudFront. Operator-verified on 17 October 2026: 29 reviewed objects passed checksum/metadata checks, and the home/callback routes returned HTTP 200 HTML. Evidence: [first static publication](docs/deployment/staging-frontend-publication.md). Browser sign-in, API connectivity, and AI functionality remain unverified.
 - [ ] Deploy the API and worker containers to Amazon ECS Fargate.
 - [ ] Use CloudFront HTTPS for the frontend; design the API's HTTPS entry point and Application Load Balancer separately.
-- [ ] Move PostgreSQL to Amazon RDS with backups, encryption, and private access.
-- [ ] Move Redis to Amazon ElastiCache when the workload needs distributed cloud caching.
+- [ ] Move PostgreSQL to Amazon RDS with backups, encryption, and private access. Private encrypted provisioning and controlled schema/role bootstrap passed; application-user connection, application use, and backup recovery remain unverified.
+- [ ] Move Redis to Amazon ElastiCache when the workload needs distributed cloud caching. Single-node Valkey provisioning/authentication/TLS settings passed; API/worker connectivity and shared state are not yet proven on AWS.
 - [ ] Use S3 as the source-document store with encryption, versioning, lifecycle rules, and least-privilege policies.
-- [ ] Replace local ingestion triggering with Amazon SQS and a dead-letter queue.
-- [ ] Use Amazon Secrets Manager for database credentials and sensitive configuration.
+- [ ] Replace local ingestion triggering with Amazon SQS and a dead-letter queue. Queue/outbox/consumer foundations exist; live staging delivery, processing, and DLQ behavior remain unverified.
+- [ ] Use Amazon Secrets Manager for database credentials and sensitive configuration. Bootstrap password injection passed; application/worker/publisher secret consumption remains to be tested.
 - [ ] Use IAM task roles with least privilege for each ECS service.
 - [ ] Use KMS for encryption where required.
-- [ ] Use CloudWatch log groups, metrics, alarms, and dashboard.
+- [ ] Use CloudWatch log groups, metrics, alarms, and dashboard. Bootstrap completion-log retrieval passed; the broader metrics/alarms/dashboard requirement remains open.
 - [ ] Use AWS X-Ray as needed alongside OpenTelemetry traces.
 
 ## Vector-store progression
@@ -330,7 +346,7 @@
 - [x] Provision a separate repository-scoped GitHub OIDC API image-publisher role. Terraform applied two IAM resources and the follow-up plan reported no changes; the separate publisher role was subsequently authenticated successfully in manual CI.
 - [x] Publish the exact scanned API image to ECR through an opt-in manual run. All seven jobs passed in [run 38788426230](https://github.com/Shruti9756/secure-cloudops-copilot/actions/runs/38788426230) on commit `998e4bf`; a read-only ECR lookup confirmed the immutable commit tag and registry digest on 16 October 2026. Evidence: `docs/deployment/api-image-security.md`. This is image publication, not application deployment.
 - [ ] Build, scan, push, and deploy images from GitHub Actions.
-- [ ] Run controlled database migrations.
+- [x] Run controlled database migrations. On 28 October, the exact recorded bootstrap task stopped with exit 0, the approved image digest, and `Database bootstrap completed.`; schema migrations and restricted-role provisioning passed. Its disposable database was then deleted. Evidence: [controlled session runbook](docs/deployment/staging-session-runbook.md).
 - [ ] Add a staging smoke test and rollback instructions.
 
 ## Technologies introduced
@@ -345,10 +361,11 @@
 
 ## Release gate
 
+- [x] Verify the bounded infrastructure/bootstrap-only ON-to-OFF checkpoint, including direct AWS resource-absence checks. Completed on 28 October; this is narrower than the running-application shutdown/rollback path.
 - [ ] `terraform plan` makes the AWS environment reproducible.
 - [ ] Staging supports sign-in, upload, ingestion, retrieval, citations, and auditing.
 - [ ] Stateful services are not public and no secret is committed to GitHub.
-- [ ] A cost clean-up procedure is documented and tested for the staging environment.
+- [ ] A cost clean-up procedure is documented and tested for the full staging application. Infrastructure/bootstrap-only cleanup passed; running-service shutdown and CloudFront API-origin detachment still need live verification.
 
 ---
 

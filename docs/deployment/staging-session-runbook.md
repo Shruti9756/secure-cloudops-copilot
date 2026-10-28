@@ -9,9 +9,13 @@ verified on 19 October 2026; six task-operator IAM simulations reported
 allowed on 19 October 2026, followed by the complete 22-check IAM
 checkpoint reported on 20 October 2026. On 28 October, the first controlled
 infrastructure attempt partially created resources, encountered two IAM
-denials, and was cleaned up; runtime OFF was independently verified.
-Database bootstrap, identity seeding, application startup, and a full
-service-start/shutdown cycle remain untested on AWS. This document does
+denials, and was cleaned up. A separately approved retry provisioned the
+runtime, verified database bootstrap in the approved Fargate image, and
+removed the runtime. The operator verified runtime OFF with a fresh clean
+Terraform plan and direct AWS absence checks. No identity-seed execution
+was confirmed; application startup and a full running-service/API-origin
+start/shutdown cycle remain untested on AWS. The disposable database was
+deleted, so its bootstrapped schema and role are no longer live. This document does
 not approve another live session. Do not execute the future live phases yet.** Keep
 `runtime_enabled=false`, `staging_document_queue_backend="disabled"`,
 `staging_api_connection_mode="disabled"`, and all ECS service desired
@@ -33,7 +37,7 @@ staging data. Never copy this procedure into development or production.
 | Platform Terraform root | `infra/terraform/environments/staging` |
 | Frontend/identity Terraform root | `infra/terraform/environments/staging-frontend` |
 | Image repository | `291667884598.dkr.ecr.us-east-1.amazonaws.com/secure-cloudops-staging/api` |
-| Configured commit tag (not deployed) | `ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a` |
+| Approved commit tag (bootstrap-tested; runtime now OFF) | `ab3731499a44cf9d05cfa26ca751aa8cf3c89c6a` |
 | Verified top-level registry digest | `sha256:8b02063529e4dc1aa931b18c21bd14b902e55fb73f0cde6dcf09a5e9b7097c37` |
 | Verified manifest media type | `application/vnd.docker.distribution.manifest.v2+json` (single image manifest) |
 
@@ -116,10 +120,13 @@ account plan or buy extra capacity as an access workaround.
   do not clear the live hold. The dedicated runtime-gated identity-seed
   task definition is now committed, and the operator found the intended
   staging user's actual `sub` privately after completing its password
-  change. PostgreSQL grants and the actual database mapping remain
-  unverified; the bounded launch/observation commands still need review
-  before a paid session. Never reuse the administrator bootstrap task with
-  a command override to run this seed.
+  change. On 28 October, cloud bootstrap completed its schema migrations
+  and restricted-role/grant provisioning. A connection authenticated as
+  the application user and the actual identity mapping remain unverified;
+  no seed execution was confirmed. Cleanup deleted that database. The
+  earlier chat seed block is retired: preparation/input and actual AWS
+  dispatch must be distinguished before another paid session. Never reuse
+  the administrator bootstrap task with a command override to run this seed.
 - **Browser integration (static HTML verified):** The dedicated staging
   Cognito/frontend outputs match the local API identity/origin inputs, and
   the reviewed export is published with home/callback HTTP 200 HTML checks
@@ -477,6 +484,69 @@ connection disabled; the repairs do not authorize another runtime-on apply
 or reuse of either saved plan. A new live attempt requires a fresh reviewed
 plan and an explicitly agreed purpose, time/cost window, and cleanup owner.
 
+### Successful runtime provisioning, bootstrap, and cleanup — 28 October 2026
+
+The operator separately approved a second database/identity-only window.
+Runtime apply began at **20:52:53 IST**, with a cleanup-start target of
+21:52:53 IST and a finish target of 22:52:53 IST. The pre-session account
+read reported `FREE`, `ACTIVE`, and **USD 157.53** remaining; this was a
+point-in-time balance, not a final bill or a guaranteed spending cap.
+
+The fresh saved plan contained **21 additions, 1 update, and 0 destroys**.
+The earlier attempt had already created the persistent foundations. The
+reviewed API security-group change retained its existing inbound rule
+and all three outbound rules, adding only the private-ALB inbound rule.
+Apply completed with those exact counts. At 21:15:16 IST the operator's
+read-only checks verified private encrypted single-AZ RDS, a single-node
+auth-token-enabled/TLS-required encrypted cache, the active internal ALB,
+API/worker services with desired/running/pending counts all zero, no tasks
+with desired status RUNNING, and the approved ECR digest. Both registered
+one-off task definitions matched their reviewed roles and secret references.
+
+The operator launched exactly one recorded database-bootstrap task:
+
+`arn:aws:ecs:us-east-1:291667884598:task/secure-cloudops-staging-cluster/305148cf755f404a8cbe80972400c194`
+
+At **21:25:10 IST**, the same task was verified `STOPPED`, with named
+container `database-bootstrap`, exit code **0**, the approved image digest
+from section 1, Linux/Fargate platform evidence, and the exact log message
+`Database bootstrap completed.` This proves that bootstrap applied its
+migrations (including the pgvector schema) and completed restricted
+`securecloudops_app` role/grant provisioning. It does not prove an
+application-user login, identity mapping, or a running API/worker.
+
+The chat seed wrapper armed a local attempt flag before its hidden prompt.
+A rerun hit that guard. A subsequent scoped audit of RUNNING/STOPPED
+identity-seed task listings found no matching task; **no seed execution
+was confirmed**. This was not evidence that Cognito rejected the subject.
+After the seed-launch cutoff, the session moved to cleanup without a
+confirmed seed run. No subject value is recorded here.
+
+The fresh OFF plan was restricted to the reviewed runtime resource list
+and restoration of the original API rule set. Cleanup completed with
+**0 additions, 1 update, and 21 destroys** at **21:55:07 IST**. Completion
+was after the cleanup-start target but before the finish target; the
+actual cleanup-start timestamp was not captured. A fresh runtime-off,
+queue-disabled Terraform plan then reported **no changes**.
+
+The operator's separate direct AWS verification reported:
+
+- RDS database absent: `DBInstanceNotFound`.
+- Private API ALB absent: `LoadBalancerNotFound`.
+- Valkey replication group absent: `ReplicationGroupNotFoundFault`.
+- No tasks with desired status RUNNING.
+- One recent task record inspected, with last status STOPPED.
+
+Runtime OFF is verified for this retry. The database and its bootstrapped
+schema/role were deleted; a future identity test needs provisioning and
+bootstrap again. Persistent network/ECR/cluster/roles/secrets/logs/queues
+and the separate static website/Cognito remain and can still incur costs.
+No final session-cost measurement was reported. Application services were
+not started, the CloudFront API connection remained disabled, and no
+document upload or AI test was performed. Both 28 October windows are
+closed; old plans, attempt flags, and fixed-deadline chat blocks must not
+be reused to start another session.
+
 ## 5. Future live phases — hold until separately approved
 
 Do not execute this section now. A valid plan with errors elsewhere in its
@@ -501,10 +571,54 @@ that case; it is not a database-only cost switch.
 
 ### Restricted identity-seed execution gate — future, not launch approval
 
-These are the required ordering and acceptance checks. The exact bounded
-PowerShell launch/observation commands still need a separate review in
-chat before a paid session; this checklist is not permission to improvise
-or execute a `RunTask` command now.
+These are the required ordering and acceptance checks. The 28 October
+chat seed wrapper is retired because it conflated preparation with a
+possible AWS attempt. Review a replacement bounded launch/observation
+block in chat before another paid session; this checklist is not permission
+to improvise or execute a `RunTask` command now.
+
+#### Prepare and test private subject input while runtime is OFF
+
+In the AWS console, select region **us-east-1**, then Cognito > User pools >
+pool ID **`us-east-1_cgRH4viJI`** > Users > the intended confirmed user's
+details > **User attributes** > the row named **`sub`**. Verify the user
+privately before paying for another runtime session. The value needed is
+that row's value, not an email, password, token, app-client ID, or a guessed
+copy of the displayed username. Before any paid provisioning, test the
+hidden-input mechanism offline with dummy input and no AWS requests.
+Private verification of the real subject can also be prepared while
+runtime is OFF: use only the reviewed hidden prompt and process memory,
+never printed input or a persisted value. This preparation is not launch
+approval. Keep the final `RunTask` confirmation separate, after fresh
+bootstrap/readiness checks in an explicitly approved session. Do not put
+the value in a guide, source file, environment variable, ordinary terminal
+command, or shared output. Do not treat a UUID-shaped string as proof of
+ownership.
+
+#### Separate preparation from dispatch in the replacement operator block
+
+Use distinct states: **prepared** (local/read-only checks),
+**input verified** (operator-checked subject collected privately),
+**dispatch outcome unknown** (set immediately before `RunTask`, only after
+the separate final launch confirmation), **task recorded** (exactly one
+returned ARN), and **verified** (same task stopped, expected exit/image/log
+evidence).
+
+The replacement must not arm a permanent AWS-attempt flag before the
+hidden prompt or call preparation "launched". A cancellation or input
+error before dispatch must explicitly report **NOT SENT**. Generate and
+print the client token/started-by marker before dispatch, retain them
+once a request might have been sent, and never print the subject or raw
+ECS responses containing overrides. A timeout or uncertain dispatch is
+not NOT SENT. Resetting a dispatch guard requires proof that the request
+was NOT SENT or definitive evidence that zero tasks were accepted. One
+eventually consistent empty listing, or finding an earlier completed
+task, is not that proof. Recover the same request/task first; do not reset
+the guard to launch a duplicate. Review/test this operator flow offline,
+then obtain a fresh live window and use current task definitions, secret
+references, and deadlines.
+
+#### Live acceptance sequence — still requires a new approved session
 
 1. Require approved purpose, duration, credits, cleanup owner, full plan,
    provisioning/deletion permissions, and successful database bootstrap.

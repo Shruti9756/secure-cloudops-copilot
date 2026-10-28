@@ -154,11 +154,14 @@ the operator's corrected permission simulation reported both
 `ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` allowed before the
 successful pull. This does not establish ECS execution-role permissions.
 
-This closes local packaging/import verification, not the cloud identity
-or deployment hold. PostgreSQL grants, verified staging Cognito-sub
-mapping, a reviewed restricted-role seed execution path, and live ECS
-image/network evidence remain unverified. No rebuild or publication is
-needed solely to record this checkpoint.
+This 19 October checkpoint closed local packaging/import verification,
+not the cloud identity or deployment hold. At that point, PostgreSQL
+grants, staging Cognito-sub mapping, and live ECS image/network evidence
+remained unverified. The separate 28 October bootstrap/cleanup checkpoint
+in the [session runbook](staging-session-runbook.md) subsequently verified
+the bootstrap task's image, migrations, restricted-role provisioning, and
+runtime removal. No identity-seed execution was confirmed. No rebuild or
+publication is needed solely to record these documentation checkpoints.
 
 ## API image publication — verified 16 October 2026
 
@@ -215,11 +218,16 @@ images, so confirm the selected image still exists before a future session.
 
 ## What remains unverified
 
-Publication does not prove ECS can pull or start the image, RDS/Valkey
-connectivity, controlled cloud migrations, SQS ingestion, Bedrock access,
-browser-to-answer staging behavior, rollback, or session shutdown. No
-application deployment was performed by this workflow. Keep the on-demand
-staging runtime off until those separate gates are reviewed.
+Publication alone does not prove a cloud deployment. On 28 October, a
+separate operator-run session verified the exact bootstrap image running
+on Fargate, controlled RDS migrations and restricted-role provisioning,
+and infrastructure removal followed by direct AWS absence checks. Its
+disposable database was deleted. API/worker/publisher operation, application
+database/cache connections, identity seeding, SQS ingestion, Bedrock
+access, browser-to-answer behavior, and full running-service/API-origin
+shutdown/rollback remain unverified. No application deployment was performed
+by this publication workflow. Keep the on-demand runtime OFF until a new
+session and its remaining gates are explicitly approved.
 
 Every publication must use the exact image that passed its scan. A
 rebuild after a scan is a new artifact and requires its own validation.
